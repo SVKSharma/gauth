@@ -1,0 +1,15 @@
+# Local agent notes are intentionally not committed.
+PROJECT-NOTES.md
+
+# Editor/agent config that only points at PROJECT-NOTES.md.
+# Nothing is lost by keeping it local: OpenCode skips missing instruction files.
+opencode.json
+opencode.jsonc
+.opencode/
+
+# Build output
+dist/
+
+# Local logs and OS noise
+*.log
+.DS_Store
