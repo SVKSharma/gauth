@@ -219,7 +219,10 @@ profile_load() {
 }
 
 profile_require() {
-  profile_load "$1" || gauth_die "Unknown profile: $1"
+  profile_load "$1" && return 0
+  ui_error "Unknown profile: $1"
+  ui_info "Run 'gauth profile list' to see the saved profiles."
+  return 1
 }
 
 profile_save() {
@@ -365,23 +368,27 @@ profile_pick() {
   [ "$allow_new" -eq 1 ] && options+=("$UI_NEW_PROFILE_LABEL")
   [ "${#options[@]}" -gt 0 ] || return 1
 
-  local choice
-  choice="$(ui_choose "$header" "${options[@]}")" || return 1
+  local choice pick_rc=0
+  choice="$(ui_choose "$header" "${options[@]}")" || pick_rc=$?
+  [ "$pick_rc" -eq 0 ] || return 1
 
-  # Item 5: create a profile inline and return it as the selection.
+  # Item 5: create a profile inline and return it as the selection. Keep the
+  # wizard's stdout off this function's stdout: callers capture the selected
+  # name with $(...), so any stray output would corrupt it.
   if [ "$choice" = "$UI_NEW_PROFILE_LABEL" ]; then
-    profile_add repo || return 1
+    profile_add repo >&2 || return 1
     [ -n "${PROFILE_LAST_ADDED:-}" ] || return 1
     printf '%s\n' "$PROFILE_LAST_ADDED"
     return 0
   fi
 
+  [ -n "$choice" ] || return 1
   printf '%s\n' "$choice"
 }
 
 profile_print() {
   local name="$1"
-  profile_require "$name"
+  profile_require "$name" || return 1
   ui_kv "Profile" "$PROFILE_NAME"
   ui_kv "SSH alias" "$PROFILE_ALIAS"
   ui_kv "Git name" "$PROFILE_GIT_NAME"

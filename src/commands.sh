@@ -26,6 +26,18 @@ Examples:
   gauth init --profile work --repo git@github.com:owner/repo.git
   gauth doctor --test
 
+Quick start:
+  New project:    mkdir my-app && cd my-app && gauth
+                  (choose "Set up this folder"; gauth runs git init for you)
+  Cloned repo:    cd repo && gauth
+                  (choose "Set up this repository", then pick a profile)
+  First profile:  gauth profile add
+                  (creates the SSH key and the Git identity)
+
+Navigation, when prompted:
+  up/down or j/k move · left/h back · right/l forward
+  enter selects · esc goes back · q quits the app
+
 gauth never commits, pushes, or changes your global git identity.
 EOF
 }
@@ -58,7 +70,7 @@ repo_apply() {
   local do_test="${4:-1}"
 
   git_require || return 1
-  profile_require "$profile_name"
+  profile_require "$profile_name" || return 1
 
   if [ ! -f "$PROFILE_KEY" ]; then
     ui_error "The private key for '$profile_name' is missing: $PROFILE_KEY"
@@ -124,9 +136,15 @@ repo_apply() {
   ui_kv "Remote" "$remote_url"
   if [ "$needs_init" -eq 1 ]; then
     ui_kv "Repository" "will be initialized on '$target_branch'"
+    ui_hint "This folder is not a git repository yet; gauth will run git init."
   else
     ui_kv "Repository" "existing git repository"
-    ui_kv "Current origin" "$(git_current_remote 2>/dev/null || printf 'none')"
+    local current_origin
+    current_origin="$(git_current_remote 2>/dev/null || printf 'none')"
+    ui_kv "Current origin" "$current_origin"
+    if [ "$current_origin" != "$remote_url" ] && [ "$current_origin" != "none" ]; then
+      ui_info "Origin will be updated to use the '$profile_name' alias."
+    fi
   fi
 
   if [ "$assume_yes" -eq 0 ]; then
@@ -160,6 +178,10 @@ repo_apply() {
   ui_kv "remote.origin.url" "$(git_current_remote)"
 
   if [ "$do_test" -eq 1 ]; then
+    # A passphrase-protected key must be unlocked before a BatchMode test.
+    if ! ssh_ensure_key_loaded "$PROFILE_KEY" "$profile_name"; then
+      ui_dim "Key is not loaded in ssh-agent; the connection test may fail if it has a passphrase."
+    fi
     if ui_task "Testing git@$PROFILE_ALIAS" ssh_test_connection "$PROFILE_ALIAS"; then
       ui_success "GitHub SSH authentication works."
       profile_update_verified "$profile_name" "$(gauth_now)" || true
@@ -170,7 +192,10 @@ repo_apply() {
     fi
   fi
 
-  ui_section "Next steps"
+  ui_section "All set"
+  ui_success "This folder is connected to GitHub through profile '$profile_name'."
+  ui_kv "Branch" "$target_branch"
+  ui_kv "Remote" "$remote_url"
   ui_info "gauth does not commit or push. When you are ready:"
   printf '  git add .\n' >&2
   printf '  git commit -m "Initial commit"\n' >&2
@@ -249,23 +274,18 @@ cmd_profile() {
   esac
 }
 
-# Run a main-menu action by id. Shared by direct selection and history navigation.
+# Run a main-menu action by id.
 main_run_action() {
   local action="$1"
   local count
   count="$(profile_count)"
   case "$action" in
     repo)
-      if [ "$count" -eq 0 ]; then
-        ui_warn "Add a profile first."
-      else
-        repo_connect_flow || true
-      fi
-      ui_pause
+      # With no profiles yet, the picker offers "Add new profile" inline.
+      repo_connect_flow || true
       ;;
     add)
       profile_add || true
-      ui_pause
       ;;
     view)
       if [ "$count" -eq 0 ]; then
@@ -273,7 +293,6 @@ main_run_action() {
       else
         profile_select_view || true
       fi
-      ui_pause
       ;;
     remove)
       if [ "$count" -eq 0 ]; then
@@ -281,18 +300,15 @@ main_run_action() {
       else
         profile_remove || true
       fi
-      ui_pause
       ;;
     settings)
       settings_menu || true
       ;;
     doctor)
       doctor_run || true
-      ui_pause
       ;;
     help)
       usage
-      ui_pause
       ;;
   esac
 }
@@ -303,24 +319,30 @@ main_menu() {
     return 1
   fi
 
-  UI_HISTORY=()
-  UI_HISTORY_POS=-1
-
-  local choice count action
+  local choice count action choose_rc repo_label
   while :; do
     count="$(profile_count)"
     ui_header "gauth $GAUTH_VERSION"
     if [ "$count" -eq 0 ]; then
-      ui_dim "  no profiles yet — start with 'Add profile'"
+      ui_section "Welcome"
+      ui_info "1. Add a profile — creates the SSH key and Git identity"
+      ui_info "2. In a project, choose 'Set up this repository'"
+      ui_info "3. New project? Run gauth inside the empty folder; git init is automatic"
     else
       ui_dim "  $count profile(s) configured"
     fi
     if git_is_repo; then
       ui_dim "  repository: $(git_repo_summary)"
+      repo_label="Set up this repository"
+    else
+      ui_dim "  not a git repository — setup will run git init for you"
+      repo_label="Set up this folder (git init + GitHub)"
     fi
 
-    choice="$(ui_choose "What do you want to do?" \
-      "Set up this repository" \
+    # Root page: there is no parent, so h/Esc show a notice instead of exiting,
+    # and l/→ opens the highlighted action just like Enter.
+    choice="$(ui_choose_nav 0 1 "What do you want to do?" \
+      "$repo_label" \
       "Add profile" \
       "View / select profile" \
       "Remove profile" \
@@ -328,11 +350,11 @@ main_menu() {
       "Doctor" \
       "Help" \
       "Exit")"
-    local choose_rc=$?
+    choose_rc=$?
     case "$choose_rc" in
       0)
         case "$choice" in
-          "Set up this repository") action="repo" ;;
+          "$repo_label"|"Set up this repository") action="repo" ;;
           "Add profile") action="add" ;;
           "View / select profile") action="view" ;;
           "Remove profile") action="remove" ;;
@@ -342,22 +364,15 @@ main_menu() {
           "Exit"|"") break ;;
           *) continue ;;
         esac
-        ui_history_record "$action"
         main_run_action "$action"
         ;;
       2)
-        # Back at the root menu means leave the app.
-        break
+        # Defensive: back at the root never quits.
+        ui_hint "You are at the top level. Press Enter to select, or q to quit."
         ;;
-      3)
-        # Forward through the history stack.
-        if ui_history_forward; then
-          action="$(ui_history_current)"
-          main_run_action "$action"
-        else
-          ui_warn "Nothing further to go forward to."
-          ui_pause
-        fi
+      4)
+        # q only: leave the application.
+        break
         ;;
       *)
         break

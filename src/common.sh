@@ -263,14 +263,6 @@ gauth_open_url() {
   esac
 }
 
-gauth_pause() {
-  local message="${1:-Press Enter to continue...}"
-  if [ -t 0 ]; then
-    printf '%s' "$message" >&2
-    IFS= read -r _ || true
-  fi
-}
-
 gauth_init_paths() {
   [ -n "${HOME:-}" ] || gauth_die "HOME is not set."
 

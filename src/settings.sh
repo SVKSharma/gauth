@@ -21,7 +21,7 @@ settings_menu() {
   local choice value
   while :; do
     settings_show
-    choice="$(ui_choose "Change a setting" \
+    choice="$(ui_choose_nav 1 1 "Change a setting" \
       "Default key type: $SETTING_DEFAULT_KEY_TYPE" \
       "Default alias prefix: $SETTING_DEFAULT_ALIAS_PREFIX" \
       "Default branch: $SETTING_DEFAULT_BRANCH" \
@@ -31,7 +31,9 @@ settings_menu() {
 
     case "$choice" in
       "Default key type:"*)
-        if value="$(ui_choose "Default key type" ed25519 rsa ecdsa "$UI_BACK_LABEL")"; then
+        if value="$(ui_choose "Default key type" \
+          "ed25519 (recommended)" "rsa (4096-bit)" "ecdsa (384-bit)" \
+          "$UI_BACK_LABEL")"; then
           if [ "$value" = "$UI_BACK_LABEL" ]; then
             continue
           fi
@@ -76,16 +78,5 @@ settings_menu() {
         ;;
       "$UI_BACK_LABEL"|"") return 0 ;;
     esac
-
-    if ui_has_gum && ui_interactive; then
-      "$GAUTH_GUM_BIN" style \
-        --foreground "$UI_MUTED_HEX" \
-        --italic \
-        --margin "1 0 0 2" \
-        -- "Press any key to continue…" >&2
-      "$GAUTH_GUM_BIN" input --placeholder " " --prompt "" --header "" --width 1 >/dev/null 2>&1 || true
-    else
-      ui_pause
-    fi
   done
 }

@@ -22,10 +22,24 @@ ssh_ensure_dir() {
   gauth_ensure_dir "$GAUTH_SSH_DIR" 700 || return 1
 }
 
+# gauth-owned keys live together in a dedicated subdirectory so the wizard can
+# safely let users choose just a file name without letting them write outside
+# the SSH directory.
+ssh_key_dir() {
+  printf '%s/gauth\n' "$GAUTH_SSH_DIR"
+}
+
+ssh_ensure_key_dir() {
+  local dir
+  dir="$(ssh_key_dir)"
+  gauth_ensure_dir "$GAUTH_SSH_DIR" 700 || return 1
+  gauth_ensure_dir "$dir" 700 || return 1
+}
+
 ssh_default_key_path() {
   local name="$1"
   local key_type="$2"
-  printf '%s/id_%s_%s\n' "$GAUTH_SSH_DIR" "$key_type" "$name"
+  printf '%s/id_%s_%s\n' "$(ssh_key_dir)" "$key_type" "$name"
 }
 
 ssh_key_fingerprint() {
@@ -88,7 +102,9 @@ ssh_generate_key() {
     ui_info "ssh-keygen will now ask for your passphrase."
   fi
 
-  if ! ssh-keygen "${args[@]}"; then
+  # Keep ssh-keygen's chatter off stdout: some callers capture this function's
+  # stdout (for example the inline "Add new profile" picker).
+  if ! ssh-keygen "${args[@]}" >&2; then
     ui_error "ssh-keygen failed."
     return 1
   fi
@@ -158,17 +174,48 @@ ssh_agent_start() {
 
 ssh_agent_add() {
   local key_path="$1"
+  local profile_name="${2:-}"
   ssh_require_tools || return 1
   if ! ssh_agent_running; then
     ui_warn "No running ssh-agent found."
     return 1
   fi
+
+  # Give the OpenSSH passphrase prompt some context. The passphrase itself is
+  # never passed through argv or the environment; ssh-add prompts on the TTY.
+  if [ -n "$profile_name" ]; then
+    ui_section "Unlock SSH key"
+    ui_info "Enter the passphrase for profile '$profile_name' when prompted."
+  else
+    ui_info "Enter the passphrase for this key when prompted."
+  fi
+  ui_dim "Key: $key_path"
+
   if ! ssh-add "$key_path"; then
     ui_error "Could not add the key to ssh-agent."
+    ui_info "Check the passphrase for '$key_path' and try again."
     return 1
   fi
   gauth_log "ssh key added to agent: $key_path"
   return 0
+}
+
+# Make sure the key is usable for a non-interactive ssh -T test. A protected
+# key must be unlocked in the agent first, because the test uses BatchMode.
+ssh_ensure_key_loaded() {
+  local key_path="$1"
+  local profile_name="${2:-}"
+  [ -f "$key_path" ] || return 1
+  ssh_agent_has_key "$key_path" && return 0
+
+  if ! ssh_agent_running; then
+    if gauth_is_true "${SETTING_AUTO_START_AGENT:-}"; then
+      ui_task "Starting ssh-agent" ssh_agent_start || return 1
+    else
+      return 1
+    fi
+  fi
+  ssh_agent_add "$key_path" "$profile_name"
 }
 
 ssh_agent_has_key() {

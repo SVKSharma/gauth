@@ -330,6 +330,36 @@ test_ssh_config() {
 }
 
 # ---------------------------------------------------------------------------
+# Alias-aware URLs and key layout
+# ---------------------------------------------------------------------------
+
+test_alias_urls_and_key_layout() {
+  assert_eq "$GAUTH_SSH_DIR/gauth/id_ed25519_demo" \
+    "$(ssh_default_key_path demo ed25519)" \
+    "new keys live under ~/.ssh/gauth"
+
+  write_ssh_config
+  sshconfig_upsert "github.com-work" "/tmp/id_ed25519_work" >/dev/null 2>&1
+  if git_parse_github_url "git@github.com-work:owner/repo.git"; then
+    assert_eq "owner/repo" "$GH_OWNER/$GH_REPO" "parse managed alias SSH URL"
+  else
+    fail "parse managed alias SSH URL" "rejected"
+  fi
+  if git_parse_github_url "ssh://git@github.com-work/owner/repo.git"; then
+    assert_eq "owner/repo" "$GH_OWNER/$GH_REPO" "parse managed alias ssh:// URL"
+  else
+    fail "parse managed alias ssh:// URL" "rejected"
+  fi
+  assert_fail "reject foreign SSH host" git_parse_github_url "git@example.com:owner/repo.git"
+
+  if profile_require "__definitely_missing__" >/dev/null 2>&1; then
+    fail "unknown profile is non-fatal"
+  else
+    pass "unknown profile is non-fatal"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Repository setup (fake git)
 # ---------------------------------------------------------------------------
 
@@ -395,6 +425,7 @@ run_test "GitHub URLs" test_github_urls
 run_test "UI fallback" test_ui_fallback
 run_test "settings" test_settings
 run_test "profiles" test_profiles
+run_test "alias URLs and key layout" test_alias_urls_and_key_layout
 run_test "repository setup" test_repo_setup
 run_test "SSH config" test_ssh_config
 run_test "SSH keys" test_ssh_key

@@ -8,10 +8,18 @@
 # Prompt return codes:
 #   0  a value was produced
 #   1  the UI is unavailable or the answer was empty/EOF
-#   2  the user went back (Esc, ctrl-c, or the "‹ Back" item)
+#   2  the user went back (Esc, left arrow, h, or "‹ Back")
+#   3  the user went forward (right arrow or l)
+#   4  the user cancelled/quit (q or "✕ Cancel")
 
 UI_BACK_LABEL="‹ Back"
-UI_NEW_PROFILE_LABEL="＋ New profile"
+UI_CANCEL_LABEL="✕ Cancel"
+UI_NEW_PROFILE_LABEL="Add new profile"
+
+# Menu items that match this label are drawn in green so the "create" action
+# stands out from the saved profiles above it. Comparison and return values
+# still use the plain label text.
+UI_MENU_HIGHLIGHT="$UI_NEW_PROFILE_LABEL"
 
 # Modern, low-saturation palette (blue/teal/amber), never the default pink.
 UI_ACCENT_HEX="#7aa2f7"
@@ -107,48 +115,6 @@ ui_hint() {
   printf '%s%s%s\n' "$UI_DIM" "$1" "$UI_RESET" >&2
 }
 
-# Keybinding legend shown under menus.
-ui_nav_hint() {
-  printf '%s↑/↓ j/k · ←/→ h/l · Shift+H back · Shift+L forward · enter select · esc back%s\n' \
-    "$UI_DIM" "$UI_RESET" >&2
-}
-
-# Menu history stack for Shift+H (back) / Shift+L (forward) navigation.
-# Each entry is a submenu id (e.g. "add", "settings").
-UI_HISTORY=()
-UI_HISTORY_POS=-1
-
-ui_history_record() {
-  local action="$1"
-  # Drop any forward entries when a new action is chosen.
-  if [ "$UI_HISTORY_POS" -ge 0 ] && [ "$UI_HISTORY_POS" -lt "$((${#UI_HISTORY[@]} - 1))" ]; then
-    UI_HISTORY=("${UI_HISTORY[@]:0:$((UI_HISTORY_POS + 1))}")
-  fi
-  UI_HISTORY+=("$action")
-  UI_HISTORY_POS=$((${#UI_HISTORY[@]} - 1))
-}
-
-ui_history_back() {
-  if [ "$UI_HISTORY_POS" -gt 0 ]; then
-    UI_HISTORY_POS=$((UI_HISTORY_POS - 1))
-    return 0
-  fi
-  return 1
-}
-
-ui_history_forward() {
-  if [ "$UI_HISTORY_POS" -ge 0 ] && [ "$UI_HISTORY_POS" -lt "$((${#UI_HISTORY[@]} - 1))" ]; then
-    UI_HISTORY_POS=$((UI_HISTORY_POS + 1))
-    return 0
-  fi
-  return 1
-}
-
-ui_history_current() {
-  [ "$UI_HISTORY_POS" -ge 0 ] && [ "$UI_HISTORY_POS" -lt "${#UI_HISTORY[@]}" ] || return 1
-  printf '%s\n' "${UI_HISTORY[$UI_HISTORY_POS]}"
-}
-
 # Enhanced header with gum style
 ui_header() {
   local text="$1"
@@ -238,10 +204,13 @@ ui_stepper() {
 # ---------------------------------------------------------------------------
 # Input
 # ---------------------------------------------------------------------------
+# The optional 4th argument adds wizard-style navigation: Enter keeps the
+# value, ":back" returns 2, and ":cancel"/":q" returns 4.
 ui_input() {
   local header="$1"
   local placeholder="${2:-}"
   local default="${3:-}"
+  local show_nav="${4:-0}"
   local answer=""
 
   if ui_has_gum && ui_interactive; then
@@ -252,6 +221,11 @@ ui_input() {
       args+=(--value "$default")
     fi
     if answer="$("$GAUTH_GUM_BIN" "${args[@]}")"; then
+      case "$answer" in
+        ':b'|':back') return 2 ;;
+        ':f'|':forward') return 3 ;;
+        ':cancel'|':c'|':q') return 4 ;;
+      esac
       printf '%s\n' "$answer"
       return 0
     fi
@@ -265,13 +239,17 @@ ui_input() {
     return 0
   fi
 
+  [ "$show_nav" -eq 1 ] && ui_hint "  :back · :forward · :cancel"
   printf '%s%s%s ' "$UI_ACCENT" "$header" "$UI_RESET" >&2
   [ -n "$placeholder" ] && printf '%s(%s) %s' "$UI_DIM" "$placeholder" "$UI_RESET" >&2
   [ -n "$default" ] && printf '%s[%s] %s' "$UI_MUTED" "$default" "$UI_RESET" >&2
   printf '❯ ' >&2
   IFS= read -r answer || return 1
   case "$answer" in
-    ':b'|'back'|'BACK') return 2 ;;
+    $'\033'*) return 2 ;;
+    ':b'|':back'|'back'|'BACK') return 2 ;;
+    ':f'|':forward') return 3 ;;
+    ':c'|':cancel'|':q'|'cancel'|'CANCEL') return 4 ;;
   esac
   [ -n "$answer" ] || answer="$default"
   printf '%s\n' "$answer"
@@ -329,8 +307,13 @@ ui_confirm() {
 }
 
 # ---------------------------------------------------------------------------
-# Plain-ANSI menu: arrows or j/k, enter to select, esc to go back.
-# No numbers, no required gum.
+# Plain-ANSI menu: arrows or j/k to move, h/left to go back one page, l/right
+# to open the highlighted item, enter to select, q to quit.
+#
+# UI_MENU_CAN_BACK says whether a parent page exists (0 shows an inline notice
+# instead of returning 2). UI_MENU_L_OPENS=1 means the menu is a navigation page
+# (main menu, settings list), so l/right acts like Enter and opens the item.
+# For value menus (key type, profiles, ...) l only reminds you to press Enter.
 # ---------------------------------------------------------------------------
 ui_menu_raw() {
   local header="$1"
@@ -343,6 +326,9 @@ ui_menu_raw() {
   local count=${#items[@]}
   [ "$count" -gt 0 ] || return 1
 
+  local can_back="${UI_MENU_CAN_BACK:-1}"
+  local l_opens="${UI_MENU_L_OPENS:-0}"
+
   local tty=/dev/tty
   [ -r "$tty" ] || return 1
   local saved
@@ -350,7 +336,7 @@ ui_menu_raw() {
   stty -echo -icanon min 1 time 0 <"$tty" 2>/dev/null || return 1
   printf '\033[?25l' >&2
 
-  local selected=0 drawn=0 key rest first=1
+  local selected=0 drawn=0 key rest first=1 notice=""
   while :; do
     if [ "$first" -eq 1 ]; then
       first=0
@@ -362,18 +348,26 @@ ui_menu_raw() {
       printf '%s❯ %s%s\n' "$UI_BOLD$UI_ACCENT" "$header" "$UI_RESET" >&2
       drawn=$((drawn + 1))
     fi
-    local i=0
+    local i=0 item_color
     for item in "${items[@]}"; do
+      item_color="$UI_TEXT"
+      if [ -n "${UI_MENU_HIGHLIGHT:-}" ] && [ "$item" = "$UI_MENU_HIGHLIGHT" ]; then
+        item_color="$UI_GREEN"
+      fi
       if [ "$i" -eq "$selected" ]; then
-        printf '  %s❯%s %s%s%s\n' "$UI_ACCENT" "$UI_RESET" "$UI_BOLD" "$item" "$UI_RESET" >&2
+        printf '  %s❯%s %s%s%s\n' "$UI_ACCENT" "$UI_RESET" "$UI_BOLD$item_color" "$item" "$UI_RESET" >&2
       else
-        printf '    %s%s%s\n' "$UI_TEXT" "$item" "$UI_RESET" >&2
+        printf '    %s%s%s\n' "$item_color" "$item" "$UI_RESET" >&2
       fi
       drawn=$((drawn + 1))
       i=$((i + 1))
     done
-    printf '%s↑/↓ j/k move · h/l or ←/→ step · Shift+H back · Shift+L forward · esc back%s\n' "$UI_DIM" "$UI_RESET" >&2
+    printf '%s↑/↓ j/k move · h/← back · l/→ open · enter select · q quit%s\n' "$UI_DIM" "$UI_RESET" >&2
     drawn=$((drawn + 1))
+    if [ -n "$notice" ]; then
+      printf '%s! %s%s\n' "$UI_YELLOW" "$notice" "$UI_RESET" >&2
+      drawn=$((drawn + 1))
+    fi
 
     IFS= read -rsn1 key <"$tty" || {
       stty "$saved" <"$tty" 2>/dev/null
@@ -382,23 +376,31 @@ ui_menu_raw() {
     }
     case "$key" in
       ''|$'\r'|$'\n') break ;;
-      k|K) [ "$selected" -gt 0 ] && selected=$((selected - 1)) ;;
-      j|J) [ "$selected" -lt "$((count - 1))" ] && selected=$((selected + 1)) ;;
-      h|H)
+      k|K) [ "$selected" -gt 0 ] && selected=$((selected - 1)); notice="" ;;
+      j|J) [ "$selected" -lt "$((count - 1))" ] && selected=$((selected + 1)); notice="" ;;
+      g) selected=0; notice="" ;;
+      G) selected=$((count - 1)); notice="" ;;
+      h)
+        if [ "$can_back" -eq 1 ]; then
+          stty "$saved" <"$tty" 2>/dev/null
+          printf '\033[?25h' >&2
+          return 2
+        fi
+        notice="No previous screen. Press Enter to select an item, or q to quit."
+        ;;
+      l)
+        # On navigation pages l/→ opens the highlighted item, exactly like Enter.
+        if [ "$l_opens" -eq 1 ]; then
+          break
+        fi
+        notice="Use Enter to select an item; l/→ does not choose."
+        ;;
+      q|Q)
+        # Distinct from "back": only q leaves the application at the root menu.
         stty "$saved" <"$tty" 2>/dev/null
         printf '\033[?25h' >&2
-        return 2
+        return 4
         ;;
-      g) selected=0 ;;
-      G) selected=$((count - 1)) ;;
-      l|L)
-        stty "$saved" <"$tty" 2>/dev/null
-        printf '\033[?25h' >&2
-        return 3
-        ;;
-      q) stty "$saved" <"$tty" 2>/dev/null
-        printf '\033[?25h' >&2
-        return 2 ;;
       $'\033')
         # Distinguish a bare Esc (back) from a CSI/SS3 arrow sequence. A plain
         # read with VMIN=0/VTIME=1 returns empty after ~0.1s for a bare Esc,
@@ -410,34 +412,42 @@ ui_menu_raw() {
         # it still fills `rest` with the buffered arrow bytes, so don't reset.
         IFS= read -r rest <"$tty" || true
         if [ -z "$rest" ]; then
-          stty "$saved" <"$tty" 2>/dev/null
-          printf '\033[?25h' >&2
-          return 2
+          if [ "$can_back" -eq 1 ]; then
+            stty "$saved" <"$tty" 2>/dev/null
+            printf '\033[?25h' >&2
+            return 2
+          fi
+          notice="No previous screen. Press Enter to select an item, or q to quit."
+        else
+          case "$rest" in
+            '['*|'O'*)
+              key="${rest#?}"
+              if [ -z "$key" ]; then
+                IFS= read -rsn1 key <"$tty" || key=""
+              fi
+              case "$key" in
+                A) [ "$selected" -gt 0 ] && selected=$((selected - 1)); notice="" ;;
+                B) [ "$selected" -lt "$((count - 1))" ] && selected=$((selected + 1)); notice="" ;;
+                H) selected=0; notice="" ;;
+                F) selected=$((count - 1)); notice="" ;;
+                D)
+                  if [ "$can_back" -eq 1 ]; then
+                    stty "$saved" <"$tty" 2>/dev/null
+                    printf '\033[?25h' >&2
+                    return 2
+                  fi
+                  notice="No previous screen. Press Enter to select an item, or q to quit."
+                  ;;
+                C)
+                  if [ "$l_opens" -eq 1 ]; then
+                    break
+                  fi
+                  notice="Use Enter to select an item; l/→ does not choose."
+                  ;;
+              esac
+              ;;
+          esac
         fi
-        case "$rest" in
-          '['*|'O'*)
-            key="${rest#?}"
-            if [ -z "$key" ]; then
-              IFS= read -rsn1 key <"$tty" || key=""
-            fi
-            case "$key" in
-              A) [ "$selected" -gt 0 ] && selected=$((selected - 1)) ;;
-              B) [ "$selected" -lt "$((count - 1))" ] && selected=$((selected + 1)) ;;
-              H) selected=0 ;;
-              F) selected=$((count - 1)) ;;
-              D)
-                stty "$saved" <"$tty" 2>/dev/null
-                printf '\033[?25h' >&2
-                return 2
-                ;;
-              C)
-                stty "$saved" <"$tty" 2>/dev/null
-                printf '\033[?25h' >&2
-                return 3
-                ;;
-            esac
-            ;;
-        esac
         stty min 1 time 0 <"$tty" 2>/dev/null
         ;;
     esac
@@ -452,13 +462,38 @@ ui_menu_raw() {
 # ---------------------------------------------------------------------------
 # Choice. Vim keys and arrows in both backends; Esc returns 2.
 # ---------------------------------------------------------------------------
+
+# ui_choose with explicit page behaviour:
+#   BACK_OK  1 when a parent page exists (h/Esc go back); 0 keeps the menu open
+#            and shows "No previous screen..." instead.
+#   L_OPENS  1 for navigation pages (main menu, settings list) where l/→ opens
+#            the highlighted item; 0 for value menus, where only Enter selects.
+ui_choose_nav() {
+  local back_ok="$1"
+  local l_opens="$2"
+  shift 2
+  local header="$1"
+  shift
+  [ "$#" -gt 0 ] || return 1
+
+  local saved_back="${UI_MENU_CAN_BACK-}"
+  local saved_opens="${UI_MENU_L_OPENS-}"
+  UI_MENU_CAN_BACK="$back_ok"
+  UI_MENU_L_OPENS="$l_opens"
+  ui_choose "$header" "$@"
+  local rc=$?
+  UI_MENU_CAN_BACK="$saved_back"
+  UI_MENU_L_OPENS="$saved_opens"
+  return "$rc"
+}
+
 ui_choose() {
   local header="$1"
   shift
   [ "$#" -gt 0 ] || return 1
 
   # The custom menu is the default because it provides the vim-style
-  # navigation (j/k, h/l, Shift+H/Shift+L, g/G, Esc) the project documents.
+  # navigation (j/k, h/l, g/G, Esc) the project documents.
   # Set GAUTH_GUM_CHOOSE=1 to use gum's own chooser instead.
   if ui_interactive && [ "${GAUTH_GUM_CHOOSE:-0}" != "1" ]; then
     if ui_has_gum; then
@@ -586,10 +621,6 @@ ui_spin() {
   shift
   [ "$#" -gt 0 ] || return 1
   ui_task "$title" "$@"
-}
-
-ui_pause() {
-  gauth_pause "${1:-Press enter to continue…}"
 }
 
 ui_github_key_url() {

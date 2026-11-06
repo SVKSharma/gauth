@@ -22,9 +22,13 @@ for every repository.
 ## Features
 
 - Interactive menu for adding, viewing, selecting, and removing profiles
-- Guided repository setup from an HTTPS or SSH GitHub URL
+- Guided repository setup from an HTTPS or SSH GitHub URL, including URLs that
+  already use a gauth alias such as `git@github.com-work:owner/repo.git`
+- Works in an empty folder too: setup runs `git init` and connects the remote
 - ed25519 (default), RSA 4096, or ECDSA 384 keys
-- Optional passphrase, handled by `ssh-keygen` directly
+- Optional passphrase, handled by `ssh-keygen` directly, with a profile-aware
+  prompt when the key is unlocked later
+- Duplicate-profile and existing-key safeguards with an explicit archive/use choice
 - Safe `~/.ssh/config` editing with backups and managed blocks
 - Public key copied to the clipboard, with OSC 52 and manual fallbacks
 - `ssh-agent` reuse, startup, and environment files for bash/zsh/fish
@@ -110,14 +114,22 @@ The interactive menu and the profile wizard use vim-style keys:
 | Keys | Action |
 | --- | --- |
 | `j` / `k`, ↓ / ↑ | Move down / up |
-| `h` / `l`, ← / → | Go back / forward a step |
-| `Shift+H`, `Esc` | Back (also leaves the main menu) |
-| `Shift+L` | Forward through your menu history |
+| `h` / ← | Back (previous step or menu) |
+| `l` / → | Forward (wizard step or menu history) |
+| `Esc` | Back, for non-vim users |
 | `g` / `G` | Jump to the first / last item |
 | `Enter` | Select / confirm |
+| `q` | Quit the whole app |
 
-The wizard draws a commit-graph timeline so you can see which step you are on,
-and `Shift+L` replays the last actions you took from the main menu.
+At the root menu, `h`, `Esc`, and the left arrow never close gauth: they either
+walk back through your action history or show a hint. Only `q` (or the `Exit`
+item) quits. When there is nowhere to go back or forward, the menu says so and
+stays open; a repeated `l`/→ reminds you that `Enter` selects an item.
+
+The wizard draws a commit-graph timeline and records the value chosen at each
+completed step, for example `01 Profile name [work]`. Inside a wizard text
+prompt, type `:back`, `:forward`, or `:cancel`; menu steps also expose
+`‹ Back` and `✕ Cancel` items.
 
 ## Commands
 
@@ -135,8 +147,12 @@ and `Shift+L` replays the last actions you took from the main menu.
 
 ## What gauth changes
 
-- Creates `~/.ssh/id_<type>_<profile>` and its `.pub` file if needed
-- Ensures `~/.ssh` is `700`, private keys are `600`, public keys are `644`
+- Creates `~/.ssh/gauth/id_<type>_<profile>` and its `.pub` file if needed
+  (the wizard only lets you choose the file name, never an arbitrary path)
+- Ensures `~/.ssh` and `~/.ssh/gauth` are `700`, private keys are `600`,
+  public keys are `644`
+- Asks `ssh-add` for the passphrase with the profile name and key path shown,
+  and never passes the passphrase through argv or the environment
 - Adds a managed block to `~/.ssh/config`:
 
 ```sshconfig
@@ -144,7 +160,7 @@ and `Shift+L` replays the last actions you took from the main menu.
 Host github.com-work
   HostName github.com
   User git
-  IdentityFile /home/you/.ssh/id_ed25519_work
+  IdentityFile /home/you/.ssh/gauth/id_ed25519_work
   IdentitiesOnly yes
 # <<< gauth:github.com-work <<<
 ```

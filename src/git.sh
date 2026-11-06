@@ -37,6 +37,25 @@ git_local_config() {
   git config --local --get "$1" 2>/dev/null
 }
 
+# A gauth SSH alias (or any alias that resolves to github.com) may stand in for
+# github.com in a remote URL, e.g. git@github.com-work:owner/repo.git.
+git_alias_is_github() {
+  local alias="$1"
+  [ -n "$alias" ] || return 1
+  sshconfig_has_managed "$alias" >/dev/null 2>&1 && return 0
+
+  local n a g e k kt c v
+  if [ -n "${GAUTH_PROFILES_FILE:-}" ] && [ -f "$GAUTH_PROFILES_FILE" ]; then
+    while IFS=$'\t' read -r n a g e k kt c v || [ -n "$n" ]; do
+      case "$n" in ''|'#'*) continue ;; esac
+      [ "$a" = "$alias" ] && return 0
+    done <"$GAUTH_PROFILES_FILE"
+  fi
+
+  [ "$(ssh_config_hostname "$alias" 2>/dev/null || true)" = "$GAUTH_DEFAULT_HOST" ] && return 0
+  return 1
+}
+
 git_parse_github_url() {
   local url
   url="$(gauth_trim "${1:-}")"
@@ -51,7 +70,7 @@ git_parse_github_url() {
   url="${url%%\?*}"
   url="${url%%#*}"
 
-  local rest=""
+  local rest="" host=""
   case "$url" in
     https://github.com/*) rest="${url#https://github.com/}" ;;
     http://github.com/*) rest="${url#http://github.com/}" ;;
@@ -61,6 +80,18 @@ git_parse_github_url() {
     git@github.com:*) rest="${url#git@github.com:}" ;;
     www.github.com/*) rest="${url#www.github.com/}" ;;
     github.com/*) rest="${url#github.com/}" ;;
+    git@*:*)
+      host="${url#git@}"
+      host="${host%%:*}"
+      rest="${url#*:}"
+      git_alias_is_github "$host" || return 1
+      ;;
+    ssh://git@*/*)
+      host="${url#ssh://git@}"
+      host="${host%%/*}"
+      rest="${url#ssh://git@*/}"
+      git_alias_is_github "$host" || return 1
+      ;;
     *)
       # Allow the short "owner/repo" form.
       case "$url" in

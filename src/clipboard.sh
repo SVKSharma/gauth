@@ -71,7 +71,7 @@ clipboard_copy_public_key() {
   fi
 
   ui_warn "Could not reach a clipboard. Copy the key below manually:"
-  printf '\n%s%s%s\n\n' "$UI_BOLD" "$public_key" "$UI_RESET"
+  printf '\n%s%s%s\n\n' "$UI_BOLD" "$public_key" "$UI_RESET" >&2
   return 1
 }
 
