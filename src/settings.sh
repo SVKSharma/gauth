@@ -4,9 +4,22 @@
 settings_menu() {
   gauth_require_tty || return 1
   settings_load
+
+  if ui_has_gum && ui_interactive; then
+    "$GAUTH_GUM_BIN" style \
+      --border rounded \
+      --border-foreground "$UI_BORDER_HEX" \
+      --foreground "$UI_ACCENT_HEX" \
+      --bold \
+      --padding "1 2" \
+      --margin "1 0" \
+      -- "Settings" >&2
+  else
+    ui_header "Settings"
+  fi
+
   local choice value
   while :; do
-    ui_header "Settings"
     settings_show
     choice="$(ui_choose "Change a setting" \
       "Default key type: $SETTING_DEFAULT_KEY_TYPE" \
@@ -14,31 +27,37 @@ settings_menu() {
       "Default branch: $SETTING_DEFAULT_BRANCH" \
       "Copy public key to clipboard: $SETTING_COPY_PUBLIC_KEY" \
       "Automatically start ssh-agent: $SETTING_AUTO_START_AGENT" \
-      "Back")" || return 0
+      "$UI_BACK_LABEL")" || return 0
 
     case "$choice" in
       "Default key type:"*)
-        value="$(ui_choose "Default key type" ed25519 rsa ecdsa)" || continue
-        if settings_set default_key_type "$value"; then
-          ui_success "Default key type updated."
-        else
-          ui_error "Could not update the setting."
+        if value="$(ui_choose "Default key type" ed25519 rsa ecdsa "$UI_BACK_LABEL")"; then
+          if [ "$value" = "$UI_BACK_LABEL" ]; then
+            continue
+          fi
+          if settings_set default_key_type "$(profile_key_type_from_choice "$value")"; then
+            ui_success "Default key type updated."
+          else
+            ui_error "Could not update the setting."
+          fi
         fi
         ;;
       "Default alias prefix:"*)
-        value="$(ui_input "Default alias prefix" "github.com-" "$SETTING_DEFAULT_ALIAS_PREFIX")" || continue
-        if settings_set default_alias_prefix "$value"; then
-          ui_success "Alias prefix updated."
-        else
-          ui_error "Use only letters, numbers, dot, underscore, or hyphen."
+        if value="$(ui_input "Default alias prefix" "github.com-" "$SETTING_DEFAULT_ALIAS_PREFIX")"; then
+          if settings_set default_alias_prefix "$value"; then
+            ui_success "Alias prefix updated."
+          else
+            ui_error "Use only letters, numbers, dot, underscore, or hyphen."
+          fi
         fi
         ;;
       "Default branch:"*)
-        value="$(ui_input "Default branch" "main" "$SETTING_DEFAULT_BRANCH")" || continue
-        if settings_set default_branch "$value"; then
-          ui_success "Default branch updated."
-        else
-          ui_error "Invalid branch name."
+        if value="$(ui_input "Default branch" "main" "$SETTING_DEFAULT_BRANCH")"; then
+          if settings_set default_branch "$value"; then
+            ui_success "Default branch updated."
+          else
+            ui_error "Invalid branch name."
+          fi
         fi
         ;;
       "Copy public key to clipboard:"*)
@@ -55,7 +74,18 @@ settings_menu() {
           settings_set auto_start_agent true && ui_success "Automatic ssh-agent start enabled."
         fi
         ;;
-      "Back"|"") return 0 ;;
+      "$UI_BACK_LABEL"|"") return 0 ;;
     esac
+
+    if ui_has_gum && ui_interactive; then
+      "$GAUTH_GUM_BIN" style \
+        --foreground "$UI_MUTED_HEX" \
+        --italic \
+        --margin "1 0 0 2" \
+        -- "Press any key to continue…" >&2
+      "$GAUTH_GUM_BIN" input --placeholder " " --prompt "" --header "" --width 1 >/dev/null 2>&1 || true
+    else
+      ui_pause
+    fi
   done
 }

@@ -141,13 +141,13 @@ git_set_remote() {
   return 0
 }
 
-git_set_gauth_account() {
+git_set_gauth_profile() {
   local name="$1"
-  git config --local gauth.account "$name"
+  git config --local gauth.profile "$name"
 }
 
-git_get_gauth_account() {
-  git config --local --get gauth.account 2>/dev/null
+git_get_gauth_profile() {
+  git config --local --get gauth.profile 2>/dev/null
 }
 
 git_repo_summary() {
@@ -155,10 +155,10 @@ git_repo_summary() {
     printf 'not a git repository'
     return 0
   fi
-  local branch remote account
+  local branch remote profile
   branch="$(git_current_branch)"
   remote="$(git_current_remote)"
-  account="$(git_get_gauth_account)"
-  printf 'branch=%s remote=%s account=%s' \
-    "${branch:-?}" "${remote:-none}" "${account:-unset}"
+  profile="$(git_get_gauth_profile)"
+  printf 'branch=%s remote=%s profile=%s' \
+    "${branch:-?}" "${remote:-none}" "${profile:-unset}"
 }

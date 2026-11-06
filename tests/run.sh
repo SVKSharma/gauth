@@ -151,7 +151,7 @@ setup_env() {
   gauth_init_paths
   config_init
   settings_init
-  accounts_init
+  profiles_init
 }
 
 run_test() {
@@ -169,11 +169,11 @@ run_test() {
 test_build_and_cli() {
   pass "build"
   assert_ok "generated script parses" bash -n "$DIST"
-  assert_eq "gauth 0.1.0" "$("$DIST" version)" "version command"
+  assert_eq "gauth 0.2.0" "$("$DIST" version)" "version command"
   local help
   help="$("$DIST" help 2>&1)"
   case "$help" in
-    *"guided Git and GitHub account setup"*) pass "help command" ;;
+    *"guided Git and GitHub profile setup"*) pass "help command" ;;
     *) fail "help command" "$help" ;;
   esac
 }
@@ -183,9 +183,9 @@ test_build_and_cli() {
 # ---------------------------------------------------------------------------
 
 test_validation() {
-  assert_ok "valid account name" validate_account_name "work-1"
-  assert_fail "reject leading dash" validate_account_name "-work"
-  assert_fail "reject spaces" validate_account_name "my work"
+  assert_ok "valid profile name" validate_profile_name "work-1"
+  assert_fail "reject leading dash" validate_profile_name "-work"
+  assert_fail "reject spaces" validate_profile_name "my work"
   assert_ok "valid email" validate_email "a@example.com"
   assert_ok "valid dotted email" validate_email "first.last+tag@example.co.uk"
   assert_fail "reject malformed email" validate_email "a@example"
@@ -249,7 +249,7 @@ test_ui_fallback() {
 }
 
 # ---------------------------------------------------------------------------
-# Settings and accounts
+# Settings and profiles
 # ---------------------------------------------------------------------------
 
 test_settings() {
@@ -265,25 +265,25 @@ test_settings() {
   assert_fail "reject bad branch" settings_set default_branch "bad branch"
 }
 
-test_accounts() {
-  assert_eq "0" "$(account_count)" "empty account count"
-  account_save work "github.com-work" "Work User" "work@example.com" "/tmp/id_ed25519_work" ed25519 || fail "save account"
-  assert_eq "1" "$(account_count)" "account count"
-  assert_ok "account exists" account_exists work
-  assert_ok "load account" account_load work
-  assert_eq "github.com-work" "$ACC_ALIAS" "account alias"
-  assert_eq "Work User" "$ACC_GIT_NAME" "account git name"
-  assert_eq "work@example.com" "$ACC_EMAIL" "account email"
-  assert_fail "reject duplicate" account_save work "github.com-work2" "Work" "work@example.com" "/tmp/k" ed25519
-  assert_ok "alias in use" account_alias_in_use "github.com-work"
-  assert_fail "alias excluded for same account" account_alias_in_use "github.com-work" work
-  account_update_verified work 12345 || fail "update verified"
-  account_load work
-  assert_eq "12345" "$ACC_VERIFIED" "verified timestamp"
-  account_delete work || fail "delete account"
-  assert_fail "account gone" account_exists work
-  assert_eq "0" "$(account_count)" "count after delete"
-  assert_ok "header survives" grep -q '^# gauth accounts v1' "$GAUTH_ACCOUNTS_FILE"
+test_profiles() {
+  assert_eq "0" "$(profile_count)" "empty profile count"
+  profile_save work "github.com-work" "Work User" "work@example.com" "/tmp/id_ed25519_work" ed25519 || fail "save profile"
+  assert_eq "1" "$(profile_count)" "profile count"
+  assert_ok "profile exists" profile_exists work
+  assert_ok "load profile" profile_load work
+  assert_eq "github.com-work" "$PROFILE_ALIAS" "profile alias"
+  assert_eq "Work User" "$PROFILE_GIT_NAME" "profile git name"
+  assert_eq "work@example.com" "$PROFILE_EMAIL" "profile email"
+  assert_fail "reject duplicate" profile_save work "github.com-work2" "Work" "work@example.com" "/tmp/k" ed25519
+  assert_ok "alias in use" profile_alias_in_use "github.com-work"
+  assert_fail "alias excluded for same profile" profile_alias_in_use "github.com-work" work
+  profile_update_verified work 12345 || fail "update verified"
+  profile_load work
+  assert_eq "12345" "$PROFILE_VERIFIED" "verified timestamp"
+  profile_delete work || fail "delete profile"
+  assert_fail "profile gone" profile_exists work
+  assert_eq "0" "$(profile_count)" "count after delete"
+  assert_ok "header survives" grep -q '^# gauth profiles v1' "$GAUTH_PROFILES_FILE"
 }
 
 # ---------------------------------------------------------------------------
@@ -336,7 +336,7 @@ test_ssh_config() {
 test_repo_setup() {
   mkdir -p "$GAUTH_SSH_DIR"
   : >"$GAUTH_SSH_DIR/id_ed25519_work"
-  account_save work "github.com-work" "Work User" "work@example.com" "$GAUTH_SSH_DIR/id_ed25519_work" ed25519 || fail "save repo account"
+  profile_save work "github.com-work" "Work User" "work@example.com" "$GAUTH_SSH_DIR/id_ed25519_work" ed25519 || fail "save repo profile"
   export FAKE_GIT_LOG="$WORK/git.log"
   : >"$FAKE_GIT_LOG"
 
@@ -348,7 +348,7 @@ test_repo_setup() {
   assert_ok "init uses default branch" grep -q '^init -b main$' "$FAKE_GIT_LOG"
   assert_ok "local identity set" grep -q '^config --local user.name Work User$' "$FAKE_GIT_LOG"
   assert_ok "remote added" grep -q '^remote add origin git@github.com-work:owner/repo.git$' "$FAKE_GIT_LOG"
-  assert_ok "account recorded in git config" grep -q '^config --local gauth.account work$' "$FAKE_GIT_LOG"
+  assert_ok "profile recorded in git config" grep -q '^config --local gauth.profile work$' "$FAKE_GIT_LOG"
 }
 
 # ---------------------------------------------------------------------------
@@ -394,7 +394,7 @@ run_test "validation" test_validation
 run_test "GitHub URLs" test_github_urls
 run_test "UI fallback" test_ui_fallback
 run_test "settings" test_settings
-run_test "accounts" test_accounts
+run_test "profiles" test_profiles
 run_test "repository setup" test_repo_setup
 run_test "SSH config" test_ssh_config
 run_test "SSH keys" test_ssh_key

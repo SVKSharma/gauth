@@ -3,19 +3,19 @@
 
 usage() {
   cat <<EOF
-gauth $GAUTH_VERSION - guided Git and GitHub account setup
+gauth $GAUTH_VERSION - guided Git and GitHub profile setup
 
 Usage:
   gauth                         Interactive menu
   gauth init [options]          Connect the current directory to GitHub
-  gauth account <command>       list | add | remove | show | select
+  gauth profile <command>       list | add | remove | show | select
   gauth settings                Change defaults
   gauth doctor [--test] [--fix] Check the installation
   gauth version                 Print the version
   gauth help                    Show this help
 
 init options:
-  --account NAME   Use an existing gauth account
+  --profile NAME   Use an existing gauth profile
   --repo URL       GitHub repository URL (HTTPS or SSH)
   --yes            Apply without confirmation prompts
   --no-test        Skip the ssh -T connection test
@@ -23,7 +23,7 @@ init options:
 Examples:
   gauth
   gauth init --repo https://github.com/owner/repo.git
-  gauth init --account work --repo git@github.com:owner/repo.git
+  gauth init --profile work --repo git@github.com:owner/repo.git
   gauth doctor --test
 
 gauth never commits, pushes, or changes your global git identity.
@@ -37,7 +37,12 @@ cmd_version() {
 repo_prompt_url() {
   local repo_url=""
   while :; do
-    repo_url="$(ui_input "GitHub repository URL" "https://github.com/owner/repo.git" "")" || return 1
+    if repo_url="$(ui_input "GitHub repository URL" "https://github.com/owner/repo.git" "")"; then
+      :
+    else
+      [ "$?" -eq 2 ] && continue
+      return 1
+    fi
     if git_parse_github_url "$repo_url"; then
       printf '%s\n' "$repo_url"
       return 0
@@ -47,27 +52,27 @@ repo_prompt_url() {
 }
 
 repo_apply() {
-  local account_name="$1"
+  local profile_name="$1"
   local repo_url="$2"
   local assume_yes="${3:-0}"
   local do_test="${4:-1}"
 
   git_require || return 1
-  account_require "$account_name"
+  profile_require "$profile_name"
 
-  if [ ! -f "$ACC_KEY" ]; then
-    ui_error "The private key for '$account_name' is missing: $ACC_KEY"
-    ui_info "Run 'gauth doctor' or add the account again."
+  if [ ! -f "$PROFILE_KEY" ]; then
+    ui_error "The private key for '$profile_name' is missing: $PROFILE_KEY"
+    ui_info "Run 'gauth doctor' or add the profile again."
     return 1
   fi
 
-  if ! sshconfig_has_managed "$ACC_ALIAS"; then
-    if sshconfig_alias_exists "$ACC_ALIAS"; then
-      ui_error "Alias '$ACC_ALIAS' exists outside gauth; cannot add a managed block."
+  if ! sshconfig_has_managed "$PROFILE_ALIAS"; then
+    if sshconfig_alias_exists "$PROFILE_ALIAS"; then
+      ui_error "Alias '$PROFILE_ALIAS' exists outside gauth; cannot add a managed block."
       return 1
     fi
-    ui_warn "SSH config block is missing; adding it for '$account_name'."
-    sshconfig_upsert "$ACC_ALIAS" "$ACC_KEY" || return 1
+    ui_warn "SSH config block is missing; adding it for '$profile_name'."
+    sshconfig_upsert "$PROFILE_ALIAS" "$PROFILE_KEY" || return 1
   fi
 
   if [ -z "$repo_url" ]; then
@@ -102,7 +107,7 @@ repo_apply() {
   local owner="$GH_OWNER"
   local repo="$GH_REPO"
   local remote_url
-  remote_url="$(git_remote_url "$ACC_ALIAS" "$owner" "$repo")"
+  remote_url="$(git_remote_url "$PROFILE_ALIAS" "$owner" "$repo")"
   local needs_init=0
   local target_branch="$SETTING_DEFAULT_BRANCH"
   if ! git_is_repo; then
@@ -113,12 +118,12 @@ repo_apply() {
   fi
 
   ui_section "Repository plan"
-  ui_kv "Account" "$account_name"
-  ui_kv "Git name" "$ACC_GIT_NAME"
-  ui_kv "Email" "$ACC_EMAIL"
+  ui_kv "Profile" "$profile_name"
+  ui_kv "Git name" "$PROFILE_GIT_NAME"
+  ui_kv "Email" "$PROFILE_EMAIL"
   ui_kv "Remote" "$remote_url"
   if [ "$needs_init" -eq 1 ]; then
-    ui_kv "Repository" "will be initialized with branch '$SETTING_DEFAULT_BRANCH'"
+    ui_kv "Repository" "will be initialized on '$target_branch'"
   else
     ui_kv "Repository" "existing git repository"
     ui_kv "Current origin" "$(git_current_remote 2>/dev/null || printf 'none')"
@@ -139,7 +144,7 @@ repo_apply() {
     ui_success "Git repository initialized (branch: $SETTING_DEFAULT_BRANCH)."
   fi
 
-  if ! git_set_local_identity "$ACC_GIT_NAME" "$ACC_EMAIL"; then
+  if ! git_set_local_identity "$PROFILE_GIT_NAME" "$PROFILE_EMAIL"; then
     ui_error "Could not set the local git identity."
     return 1
   fi
@@ -147,7 +152,7 @@ repo_apply() {
     ui_error "Could not set remote.origin.url."
     return 1
   fi
-  git_set_gauth_account "$account_name" || true
+  git_set_gauth_profile "$profile_name" || true
 
   ui_success "Local repository configured."
   ui_kv "user.name" "$(git_local_config user.name)"
@@ -155,12 +160,12 @@ repo_apply() {
   ui_kv "remote.origin.url" "$(git_current_remote)"
 
   if [ "$do_test" -eq 1 ]; then
-    ui_info "Testing git@${ACC_ALIAS} ..."
-    if ssh_test_connection "$ACC_ALIAS"; then
+    if ui_task "Testing git@$PROFILE_ALIAS" ssh_test_connection "$PROFILE_ALIAS"; then
       ui_success "GitHub SSH authentication works."
-      account_update_verified "$account_name" "$(gauth_now)" || true
+      profile_update_verified "$profile_name" "$(gauth_now)" || true
     else
       ui_warn "SSH test did not succeed; the repository was still configured."
+      printf '%s\n' "$SSH_TEST_OUTPUT" >&2
       ssh_friendly_failure
     fi
   fi
@@ -174,27 +179,28 @@ repo_apply() {
 }
 
 repo_connect_flow() {
-  local account_name="${1:-}"
-  if [ -z "$account_name" ]; then
-    account_name="$(account_pick "Account for this repository")" || return 1
+  local profile_name="${1:-}"
+  if [ -z "$profile_name" ]; then
+    # Item 5: offer to create a profile from inside the repo flow.
+    profile_name="$(profile_pick "Profile for this repository" 1)" || return 1
   fi
-  repo_apply "$account_name" "" 0 1
+  repo_apply "$profile_name" "" 0 1
 }
 
 cmd_init() {
-  local account_name=""
+  local profile_name=""
   local repo_url=""
   local assume_yes=0
   local do_test=1
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --account)
+      --profile|--account)
         [ "$#" -ge 2 ] || {
-          ui_error "--account needs a value."
+          ui_error "$1 needs a value."
           return 2
         }
-        account_name="$2"
+        profile_name="$2"
         shift 2
         ;;
       --repo)
@@ -215,30 +221,78 @@ cmd_init() {
     esac
   done
 
-  if [ -z "$account_name" ]; then
+  if [ -z "$profile_name" ]; then
     if ! gauth_is_tty; then
-      ui_error "Use --account NAME in a non-interactive session."
+      ui_error "Use --profile NAME in a non-interactive session."
       return 1
     fi
-    account_name="$(account_pick "Account for this repository")" || return 1
+    profile_name="$(profile_pick "Profile for this repository" 1)" || return 1
   fi
 
-  repo_apply "$account_name" "$repo_url" "$assume_yes" "$do_test"
+  repo_apply "$profile_name" "$repo_url" "$assume_yes" "$do_test"
 }
 
-cmd_account() {
+cmd_profile() {
   local sub="${1:-list}"
   [ "$#" -gt 0 ] && shift
   case "$sub" in
-    list|ls) account_list_cmd ;;
-    add) account_add ;;
-    remove|rm|delete) account_remove ;;
-    show|view|select|use) account_select_view ;;
+    list|ls) profile_list_cmd ;;
+    add) profile_add ;;
+    remove|rm|delete) profile_remove ;;
+    show|view|select|use) profile_select_view ;;
     help|--help|-h) usage ;;
     *)
-      ui_error "Unknown account command: $sub"
+      ui_error "Unknown profile command: $sub"
       usage
       return 2
+      ;;
+  esac
+}
+
+# Run a main-menu action by id. Shared by direct selection and history navigation.
+main_run_action() {
+  local action="$1"
+  local count
+  count="$(profile_count)"
+  case "$action" in
+    repo)
+      if [ "$count" -eq 0 ]; then
+        ui_warn "Add a profile first."
+      else
+        repo_connect_flow || true
+      fi
+      ui_pause
+      ;;
+    add)
+      profile_add || true
+      ui_pause
+      ;;
+    view)
+      if [ "$count" -eq 0 ]; then
+        ui_warn "No profiles configured yet."
+      else
+        profile_select_view || true
+      fi
+      ui_pause
+      ;;
+    remove)
+      if [ "$count" -eq 0 ]; then
+        ui_warn "No profiles configured yet."
+      else
+        profile_remove || true
+      fi
+      ui_pause
+      ;;
+    settings)
+      settings_menu || true
+      ;;
+    doctor)
+      doctor_run || true
+      ui_pause
+      ;;
+    help)
+      usage
+      ui_pause
       ;;
   esac
 }
@@ -249,70 +303,65 @@ main_menu() {
     return 1
   fi
 
-  local choice count account
+  UI_HISTORY=()
+  UI_HISTORY_POS=-1
+
+  local choice count action
   while :; do
-    count="$(account_count)"
+    count="$(profile_count)"
     ui_header "gauth $GAUTH_VERSION"
     if [ "$count" -eq 0 ]; then
-      ui_dim "No accounts configured yet. Start with 'Add account'."
+      ui_dim "  no profiles yet — start with 'Add profile'"
     else
-      ui_dim "$count account(s) configured"
+      ui_dim "  $count profile(s) configured"
     fi
     if git_is_repo; then
-      ui_dim "Repository: $(git_repo_summary)"
+      ui_dim "  repository: $(git_repo_summary)"
     fi
 
     choice="$(ui_choose "What do you want to do?" \
       "Set up this repository" \
-      "Add account" \
-      "View / select account" \
-      "Remove account" \
+      "Add profile" \
+      "View / select profile" \
+      "Remove profile" \
       "Settings" \
       "Doctor" \
       "Help" \
-      "Exit")" || break
-
-    case "$choice" in
-      "Set up this repository")
-        if [ "$count" -eq 0 ]; then
-          ui_warn "Add an account first."
+      "Exit")"
+    local choose_rc=$?
+    case "$choose_rc" in
+      0)
+        case "$choice" in
+          "Set up this repository") action="repo" ;;
+          "Add profile") action="add" ;;
+          "View / select profile") action="view" ;;
+          "Remove profile") action="remove" ;;
+          "Settings") action="settings" ;;
+          "Doctor") action="doctor" ;;
+          "Help") action="help" ;;
+          "Exit"|"") break ;;
+          *) continue ;;
+        esac
+        ui_history_record "$action"
+        main_run_action "$action"
+        ;;
+      2)
+        # Back at the root menu means leave the app.
+        break
+        ;;
+      3)
+        # Forward through the history stack.
+        if ui_history_forward; then
+          action="$(ui_history_current)"
+          main_run_action "$action"
         else
-          repo_connect_flow || true
+          ui_warn "Nothing further to go forward to."
+          ui_pause
         fi
-        ui_pause
         ;;
-      "Add account")
-        account_add || true
-        ui_pause
+      *)
+        break
         ;;
-      "View / select account")
-        if [ "$count" -eq 0 ]; then
-          ui_warn "No accounts configured yet."
-        else
-          account_select_view || true
-        fi
-        ui_pause
-        ;;
-      "Remove account")
-        if [ "$count" -eq 0 ]; then
-          ui_warn "No accounts configured yet."
-        else
-          account_remove || true
-        fi
-        ui_pause
-        ;;
-      "Settings")
-        settings_menu || true
-        ;;
-      "Doctor")
-        doctor_run || true
-        ui_pause
-        ;;
-      "Help")
-        usage
-        ui_pause
-        ;;
-      "Exit"|"") break ;;
     esac
   done
   printf '\n'

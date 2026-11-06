@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Settings and the tab-separated account registry.
+# Settings and the tab-separated profile registry.
 
 SETTING_DEFAULT_KEY_TYPE="$GAUTH_DEFAULT_KEY_TYPE"
 SETTING_DEFAULT_ALIAS_PREFIX="$GAUTH_DEFAULT_ALIAS_PREFIX"
@@ -11,6 +11,33 @@ config_init() {
   gauth_ensure_dir "$GAUTH_CONFIG_HOME" 700 || gauth_die "Cannot create $GAUTH_CONFIG_HOME"
   gauth_ensure_dir "$GAUTH_STATE_HOME" 700 || gauth_die "Cannot create $GAUTH_STATE_HOME"
   gauth_ensure_dir "$GAUTH_BACKUP_DIR" 700 >/dev/null 2>&1 || true
+  config_migrate_legacy
+}
+
+# v0.1 called these "accounts". Move the registry once, without deleting the
+# original file.
+config_migrate_legacy() {
+  [ -f "$GAUTH_PROFILES_FILE" ] && return 0
+  [ -n "${GAUTH_LEGACY_PROFILES_FILE:-}" ] || return 0
+  [ -f "$GAUTH_LEGACY_PROFILES_FILE" ] || return 0
+
+  local tmp="${GAUTH_PROFILES_FILE}.migrate.$$"
+  {
+    printf '# gauth profiles v1\n'
+    printf '# name\talias\tgit_name\temail\tkey_path\tkey_type\tcreated\tlast_verified\n'
+    local line
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in ''|'#'*) continue ;; esac
+      printf '%s\n' "$line"
+    done <"$GAUTH_LEGACY_PROFILES_FILE"
+  } >"$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$GAUTH_PROFILES_FILE" || return 1
+  ui_dim "Migrated the v0.1 account registry to $GAUTH_PROFILES_FILE"
+  return 0
 }
 
 settings_init() {
@@ -117,20 +144,20 @@ settings_show() {
   ui_kv "Auto-start agent" "$SETTING_AUTO_START_AGENT"
 }
 
-accounts_init() {
+profiles_init() {
   config_init
-  [ -f "$GAUTH_ACCOUNTS_FILE" ] && return 0
+  [ -f "$GAUTH_PROFILES_FILE" ] && return 0
   umask 077
   {
-    printf '# gauth accounts v1\n'
+    printf '# gauth profiles v1\n'
     printf '# name\talias\tgit_name\temail\tkey_path\tkey_type\tcreated\tlast_verified\n'
-  } >"$GAUTH_ACCOUNTS_FILE" || return 1
-  chmod 600 "$GAUTH_ACCOUNTS_FILE" 2>/dev/null || true
+  } >"$GAUTH_PROFILES_FILE" || return 1
+  chmod 600 "$GAUTH_PROFILES_FILE" 2>/dev/null || true
   return 0
 }
 
-account_count() {
-  [ -f "$GAUTH_ACCOUNTS_FILE" ] || {
+profile_count() {
+  [ -f "$GAUTH_PROFILES_FILE" ] || {
     printf '0\n'
     return 0
   }
@@ -139,63 +166,63 @@ account_count() {
   while IFS=$'\t' read -r n a g e k kt c v || [ -n "$n" ]; do
     case "$n" in ''|'#'*) continue ;; esac
     count=$((count + 1))
-  done <"$GAUTH_ACCOUNTS_FILE"
+  done <"$GAUTH_PROFILES_FILE"
   printf '%s\n' "$count"
 }
 
-account_list_names() {
-  [ -f "$GAUTH_ACCOUNTS_FILE" ] || return 0
+profile_list_names() {
+  [ -f "$GAUTH_PROFILES_FILE" ] || return 0
   local n a g e k kt c v
   while IFS=$'\t' read -r n a g e k kt c v || [ -n "$n" ]; do
     case "$n" in ''|'#'*) continue ;; esac
     printf '%s\n' "$n"
-  done <"$GAUTH_ACCOUNTS_FILE"
+  done <"$GAUTH_PROFILES_FILE"
 }
 
-account_exists() {
+profile_exists() {
   local wanted="$1"
   local n a g e k kt c v
-  [ -f "$GAUTH_ACCOUNTS_FILE" ] || return 1
+  [ -f "$GAUTH_PROFILES_FILE" ] || return 1
   while IFS=$'\t' read -r n a g e k kt c v || [ -n "$n" ]; do
     [ "$n" = "$wanted" ] && return 0
-  done <"$GAUTH_ACCOUNTS_FILE"
+  done <"$GAUTH_PROFILES_FILE"
   return 1
 }
 
-account_load() {
+profile_load() {
   local wanted="$1"
-  ACC_NAME=""
-  ACC_ALIAS=""
-  ACC_GIT_NAME=""
-  ACC_EMAIL=""
-  ACC_KEY=""
-  ACC_KEY_TYPE=""
-  ACC_CREATED=""
-  ACC_VERIFIED=""
+  PROFILE_NAME=""
+  PROFILE_ALIAS=""
+  PROFILE_GIT_NAME=""
+  PROFILE_EMAIL=""
+  PROFILE_KEY=""
+  PROFILE_KEY_TYPE=""
+  PROFILE_CREATED=""
+  PROFILE_VERIFIED=""
 
-  [ -f "$GAUTH_ACCOUNTS_FILE" ] || return 1
+  [ -f "$GAUTH_PROFILES_FILE" ] || return 1
   local n a g e k kt c v
   while IFS=$'\t' read -r n a g e k kt c v || [ -n "$n" ]; do
     if [ "$n" = "$wanted" ]; then
-      ACC_NAME="$n"
-      ACC_ALIAS="$a"
-      ACC_GIT_NAME="$g"
-      ACC_EMAIL="$e"
-      ACC_KEY="$k"
-      ACC_KEY_TYPE="$kt"
-      ACC_CREATED="$c"
-      ACC_VERIFIED="$v"
+      PROFILE_NAME="$n"
+      PROFILE_ALIAS="$a"
+      PROFILE_GIT_NAME="$g"
+      PROFILE_EMAIL="$e"
+      PROFILE_KEY="$k"
+      PROFILE_KEY_TYPE="$kt"
+      PROFILE_CREATED="$c"
+      PROFILE_VERIFIED="$v"
       return 0
     fi
-  done <"$GAUTH_ACCOUNTS_FILE"
+  done <"$GAUTH_PROFILES_FILE"
   return 1
 }
 
-account_require() {
-  account_load "$1" || gauth_die "Unknown account: $1"
+profile_require() {
+  profile_load "$1" || gauth_die "Unknown profile: $1"
 }
 
-account_save() {
+profile_save() {
   local name="$1"
   local alias="$2"
   local git_name="$3"
@@ -203,7 +230,7 @@ account_save() {
   local key_path="$5"
   local key_type="$6"
 
-  validate_account_name "$name" || return 1
+  validate_profile_name "$name" || return 1
   validate_alias "$alias" || return 1
   validate_email "$email" || return 1
   validate_key_type "$key_type" || return 1
@@ -215,21 +242,21 @@ account_save() {
     *[[:space:]]*|*'#'*) return 1 ;;
   esac
 
-  accounts_init || return 1
-  account_exists "$name" && return 1
+  profiles_init || return 1
+  profile_exists "$name" && return 1
 
   umask 077
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$name" "$alias" "$git_name" "$email" "$key_path" "$key_type" "$(gauth_now)" "-" \
-    >>"$GAUTH_ACCOUNTS_FILE" || return 1
-  gauth_log "account saved: $name"
+    >>"$GAUTH_PROFILES_FILE" || return 1
+  gauth_log "profile saved: $name"
   return 0
 }
 
-account_delete() {
+profile_delete() {
   local wanted="$1"
-  [ -f "$GAUTH_ACCOUNTS_FILE" ] || return 1
-  local tmp="${GAUTH_ACCOUNTS_FILE}.tmp.$$"
+  [ -f "$GAUTH_PROFILES_FILE" ] || return 1
+  local tmp="${GAUTH_PROFILES_FILE}.tmp.$$"
   local found=1
   local n a g e k kt c v
   : >"$tmp" || return 1
@@ -245,23 +272,23 @@ account_delete() {
       continue
     fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$a" "$g" "$e" "$k" "$kt" "$c" "$v" >>"$tmp"
-  done <"$GAUTH_ACCOUNTS_FILE"
+  done <"$GAUTH_PROFILES_FILE"
 
   if [ "$found" -ne 0 ]; then
     rm -f "$tmp"
     return 1
   fi
   chmod 600 "$tmp" 2>/dev/null || true
-  mv "$tmp" "$GAUTH_ACCOUNTS_FILE" || return 1
-  gauth_log "account deleted: $wanted"
+  mv "$tmp" "$GAUTH_PROFILES_FILE" || return 1
+  gauth_log "profile deleted: $wanted"
   return 0
 }
 
-account_update_verified() {
+profile_update_verified() {
   local wanted="$1"
   local stamp="${2:-$(gauth_now)}"
-  [ -f "$GAUTH_ACCOUNTS_FILE" ] || return 1
-  local tmp="${GAUTH_ACCOUNTS_FILE}.tmp.$$"
+  [ -f "$GAUTH_PROFILES_FILE" ] || return 1
+  local tmp="${GAUTH_PROFILES_FILE}.tmp.$$"
   local found=1
   local n a g e k kt c v
   : >"$tmp" || return 1
@@ -278,95 +305,115 @@ account_update_verified() {
     else
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$a" "$g" "$e" "$k" "$kt" "$c" "$v" >>"$tmp"
     fi
-  done <"$GAUTH_ACCOUNTS_FILE"
+  done <"$GAUTH_PROFILES_FILE"
 
   if [ "$found" -ne 0 ]; then
     rm -f "$tmp"
     return 1
   fi
   chmod 600 "$tmp" 2>/dev/null || true
-  mv "$tmp" "$GAUTH_ACCOUNTS_FILE" || return 1
+  mv "$tmp" "$GAUTH_PROFILES_FILE" || return 1
   return 0
 }
 
-account_key_in_use() {
+profile_key_in_use() {
   local key_path="$1"
   local exclude="${2:-}"
   local n a g e k kt c v
-  [ -f "$GAUTH_ACCOUNTS_FILE" ] || return 1
+  [ -f "$GAUTH_PROFILES_FILE" ] || return 1
   while IFS=$'\t' read -r n a g e k kt c v || [ -n "$n" ]; do
     [ "$n" = "$exclude" ] && continue
     [ "$k" = "$key_path" ] && return 0
-  done <"$GAUTH_ACCOUNTS_FILE"
+  done <"$GAUTH_PROFILES_FILE"
   return 1
 }
 
-account_alias_in_use() {
+profile_alias_in_use() {
   local alias="$1"
   local exclude="${2:-}"
   local n a g e k kt c v
-  [ -f "$GAUTH_ACCOUNTS_FILE" ] || return 1
+  [ -f "$GAUTH_PROFILES_FILE" ] || return 1
   while IFS=$'\t' read -r n a g e k kt c v || [ -n "$n" ]; do
     [ "$n" = "$exclude" ] && continue
     [ "$a" = "$alias" ] && return 0
-  done <"$GAUTH_ACCOUNTS_FILE"
+  done <"$GAUTH_PROFILES_FILE"
   return 1
 }
 
-account_pick() {
-  local header="${1:-Select an account}"
-  local names=()
+profile_pick() {
+  local header="${1:-Select a profile}"
+  local allow_new="${2:-0}"
+  local -a names=()
   local name
   while IFS= read -r name; do
     [ -n "$name" ] && names+=("$name")
-  done < <(account_list_names)
+  done < <(profile_list_names)
 
-  if [ "${#names[@]}" -eq 0 ]; then
-    ui_warn "No accounts configured yet."
+  if [ "${#names[@]}" -eq 0 ] && [ "$allow_new" -eq 0 ]; then
+    ui_warn "No profiles configured yet."
     return 1
   fi
-  if [ "${#names[@]}" -eq 1 ]; then
+  if [ "${#names[@]}" -eq 1 ] && [ "$allow_new" -eq 0 ]; then
     printf '%s\n' "${names[0]}"
     return 0
   fi
-  ui_choose "$header" "${names[@]}"
+
+  local -a options=()
+  for name in "${names[@]}"; do
+    options+=("$name")
+  done
+  [ "$allow_new" -eq 1 ] && options+=("$UI_NEW_PROFILE_LABEL")
+  [ "${#options[@]}" -gt 0 ] || return 1
+
+  local choice
+  choice="$(ui_choose "$header" "${options[@]}")" || return 1
+
+  # Item 5: create a profile inline and return it as the selection.
+  if [ "$choice" = "$UI_NEW_PROFILE_LABEL" ]; then
+    profile_add repo || return 1
+    [ -n "${PROFILE_LAST_ADDED:-}" ] || return 1
+    printf '%s\n' "$PROFILE_LAST_ADDED"
+    return 0
+  fi
+
+  printf '%s\n' "$choice"
 }
 
-account_print() {
+profile_print() {
   local name="$1"
-  account_require "$name"
-  ui_kv "Account" "$ACC_NAME"
-  ui_kv "SSH alias" "$ACC_ALIAS"
-  ui_kv "Git name" "$ACC_GIT_NAME"
-  ui_kv "Email" "$ACC_EMAIL"
-  ui_kv "Key path" "$ACC_KEY"
-  ui_kv "Key type" "$ACC_KEY_TYPE"
-  if [ -f "$ACC_KEY" ]; then
+  profile_require "$name"
+  ui_kv "Profile" "$PROFILE_NAME"
+  ui_kv "SSH alias" "$PROFILE_ALIAS"
+  ui_kv "Git name" "$PROFILE_GIT_NAME"
+  ui_kv "Email" "$PROFILE_EMAIL"
+  ui_kv "Key path" "$PROFILE_KEY"
+  ui_kv "Key type" "$PROFILE_KEY_TYPE"
+  if [ -f "$PROFILE_KEY" ]; then
     ui_kv "Key file" "present"
   else
     ui_kv "Key file" "MISSING"
   fi
-  if [ "$ACC_VERIFIED" = "-" ] || [ -z "$ACC_VERIFIED" ]; then
+  if [ "$PROFILE_VERIFIED" = "-" ] || [ -z "$PROFILE_VERIFIED" ]; then
     ui_kv "Last verified" "never"
   else
-    ui_kv "Last verified" "$(gauth_format_epoch "$ACC_VERIFIED" || printf '%s' "$ACC_VERIFIED")"
+    ui_kv "Last verified" "$(gauth_format_epoch "$PROFILE_VERIFIED" || printf '%s' "$PROFILE_VERIFIED")"
   fi
 }
 
-account_list_cmd() {
+profile_list_cmd() {
   local count
-  count="$(account_count)"
+  count="$(profile_count)"
   if [ "$count" -eq 0 ]; then
-    ui_warn "No accounts configured yet."
+    ui_warn "No profiles configured yet."
     return 1
   fi
 
-  ui_section "Configured accounts"
+  ui_section "Configured profiles"
   printf '%-16s %-26s %-22s %s\n' "NAME" "SSH ALIAS" "EMAIL" "KEY"
   local n a g e k kt c v
   while IFS=$'\t' read -r n a g e k kt c v || [ -n "$n" ]; do
     case "$n" in ''|'#'*) continue ;; esac
     printf '%-16s %-26s %-22s %s\n' "$n" "$a" "$e" "$k"
-  done <"$GAUTH_ACCOUNTS_FILE"
+  done <"$GAUTH_PROFILES_FILE"
   return 0
 }

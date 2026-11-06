@@ -75,6 +75,34 @@ clipboard_copy_public_key() {
   return 1
 }
 
+# Always-visible public key block, so the key can be copied by hand even when
+# the browser opens or the clipboard is unreachable.
+clipboard_print_public_key() {
+  local pub="$1"
+  if [ ! -f "$pub" ]; then
+    ui_warn "Public key not found: $pub"
+    return 1
+  fi
+  local key
+  key="$(cat "$pub" 2>/dev/null)"
+  [ -n "$key" ] || {
+    ui_warn "Public key is empty: $pub"
+    return 1
+  }
+
+  if ui_has_gum && ui_interactive; then
+    printf '%s\n' "$key" | "$GAUTH_GUM_BIN" style \
+      --border normal \
+      --border-foreground "$UI_BORDER_HEX" \
+      --foreground "$UI_TEXT_HEX" \
+      --padding "0 1" \
+      --margin "0 1" >&2
+  else
+    printf '\n  %s\n\n' "$key" >&2
+  fi
+  return 0
+}
+
 clipboard_name() {
   case "$(uname -s 2>/dev/null)" in
     Darwin)

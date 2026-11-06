@@ -37,6 +37,26 @@ doctor_check_mode() {
   fi
 }
 
+# Files created by a sudo run cannot be modified by the user, which is the most
+# common reason a profile removal appears to "need sudo".
+doctor_check_owner() {
+  local path="$1"
+  local label="$2"
+  [ -e "$path" ] || return 0
+  local uid
+  uid="$(gauth_file_uid "$path")"
+  if [ -z "$uid" ]; then
+    doctor_warn "$label ownership could not be read: $path"
+    return 0
+  fi
+  if [ "$uid" = "$(id -u)" ]; then
+    doctor_ok "$label is owned by you: $path"
+  else
+    doctor_bad "$label is owned by uid $uid, not you: $path"
+    printf '        fix: sudo chown %s:%s %s\n' "$(id -u)" "$(id -g)" "$path"
+  fi
+}
+
 doctor_fix_permissions() {
   ui_header "Repair permissions"
   ui_info "This only changes file modes; it does not rewrite config contents."
@@ -44,76 +64,76 @@ doctor_fix_permissions() {
 
   [ -d "$GAUTH_SSH_DIR" ] && chmod 700 "$GAUTH_SSH_DIR"
   [ -f "$GAUTH_SSH_CONFIG" ] && chmod 600 "$GAUTH_SSH_CONFIG"
-  [ -f "$GAUTH_ACCOUNTS_FILE" ] && chmod 600 "$GAUTH_ACCOUNTS_FILE"
+  [ -f "$GAUTH_PROFILES_FILE" ] && chmod 600 "$GAUTH_PROFILES_FILE"
   [ -f "$GAUTH_SETTINGS_FILE" ] && chmod 600 "$GAUTH_SETTINGS_FILE"
 
   local name
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    account_load "$name" || continue
-    [ -f "$ACC_KEY" ] && chmod 600 "$ACC_KEY"
-    [ -f "${ACC_KEY}.pub" ] && chmod 644 "${ACC_KEY}.pub"
-  done < <(account_list_names)
+    profile_load "$name" || continue
+    [ -f "$PROFILE_KEY" ] && chmod 600 "$PROFILE_KEY"
+    [ -f "${PROFILE_KEY}.pub" ] && chmod 644 "${PROFILE_KEY}.pub"
+  done < <(profile_list_names)
 
   ui_success "Permissions repaired where possible."
 }
 
-doctor_check_account() {
+doctor_check_profile() {
   local name="$1"
   local test_connection="${2:-0}"
-  account_load "$name" || {
-    doctor_bad "Account record cannot be read: $name"
+  profile_load "$name" || {
+    doctor_bad "Profile record cannot be read: $name"
     return 1
   }
 
-  ui_section "Account: $name"
+  ui_section "Profile: $name"
 
-  if [ -f "$ACC_KEY" ]; then
-    doctor_ok "Private key exists: $ACC_KEY"
+  if [ -f "$PROFILE_KEY" ]; then
+    doctor_ok "Private key exists: $PROFILE_KEY"
     local mode
-    mode="$(gauth_file_mode "$ACC_KEY")"
+    mode="$(gauth_file_mode "$PROFILE_KEY")"
     case "$mode" in
       600|400) doctor_ok "Private key permissions: $mode" ;;
       *) doctor_warn "Private key permissions are ${mode:-unknown}; run 'gauth doctor --fix'" ;;
     esac
   else
-    doctor_bad "Private key is missing: $ACC_KEY"
+    doctor_bad "Private key is missing: $PROFILE_KEY"
   fi
 
-  if [ -f "${ACC_KEY}.pub" ]; then
-    doctor_ok "Public key exists: ${ACC_KEY}.pub"
+  if [ -f "${PROFILE_KEY}.pub" ]; then
+    doctor_ok "Public key exists: ${PROFILE_KEY}.pub"
   else
-    doctor_warn "Public key is missing: ${ACC_KEY}.pub"
+    doctor_warn "Public key is missing: ${PROFILE_KEY}.pub"
   fi
 
-  if sshconfig_has_managed "$ACC_ALIAS"; then
-    doctor_ok "gauth SSH config block exists: $ACC_ALIAS"
-  elif sshconfig_alias_exists "$ACC_ALIAS"; then
-    doctor_bad "Alias '$ACC_ALIAS' exists but is not managed by gauth"
+  if sshconfig_has_managed "$PROFILE_ALIAS"; then
+    doctor_ok "gauth SSH config block exists: $PROFILE_ALIAS"
+  elif sshconfig_alias_exists "$PROFILE_ALIAS"; then
+    doctor_bad "Alias '$PROFILE_ALIAS' exists but is not managed by gauth"
   else
-    doctor_bad "SSH config block is missing for alias: $ACC_ALIAS"
+    doctor_bad "SSH config block is missing for alias: $PROFILE_ALIAS"
   fi
 
   local hostname
-  hostname="$(ssh_config_hostname "$ACC_ALIAS" 2>/dev/null || true)"
+  hostname="$(ssh_config_hostname "$PROFILE_ALIAS" 2>/dev/null || true)"
   if [ "$hostname" = "$GAUTH_DEFAULT_HOST" ]; then
-    doctor_ok "ssh resolves $ACC_ALIAS to $hostname"
+    doctor_ok "ssh resolves $PROFILE_ALIAS to $hostname"
   else
-    doctor_bad "ssh -G $ACC_ALIAS did not resolve HostName=$GAUTH_DEFAULT_HOST"
+    doctor_bad "ssh -G $PROFILE_ALIAS did not resolve HostName=$GAUTH_DEFAULT_HOST"
   fi
 
   local identity
-  identity="$(ssh_config_identity "$ACC_ALIAS" 2>/dev/null || true)"
-  if [ "$identity" = "$ACC_KEY" ]; then
+  identity="$(ssh_config_identity "$PROFILE_ALIAS" 2>/dev/null || true)"
+  if [ "$identity" = "$PROFILE_KEY" ]; then
     doctor_ok "ssh resolves the expected IdentityFile"
   elif [ -n "$identity" ]; then
-    doctor_warn "ssh resolves IdentityFile=$identity (expected $ACC_KEY)"
+    doctor_warn "ssh resolves IdentityFile=$identity (expected $PROFILE_KEY)"
   else
     doctor_warn "ssh did not report an IdentityFile"
   fi
 
   if ssh_agent_running; then
-    if ssh_agent_has_key "$ACC_KEY"; then
+    if ssh_agent_has_key "$PROFILE_KEY"; then
       doctor_ok "Key is loaded in ssh-agent"
     else
       doctor_warn "Key is not loaded in ssh-agent"
@@ -123,10 +143,10 @@ doctor_check_account() {
   fi
 
   if [ "$test_connection" = "1" ]; then
-    ui_info "Testing git@${ACC_ALIAS} ..."
-    if ssh_test_connection "$ACC_ALIAS"; then
+    ui_info "Testing git@${PROFILE_ALIAS} ..."
+    if ssh_test_connection "$PROFILE_ALIAS"; then
       doctor_ok "GitHub SSH authentication works"
-      account_update_verified "$name" "$(gauth_now)" || true
+      profile_update_verified "$name" "$(gauth_now)" || true
     else
       doctor_bad "GitHub SSH authentication failed"
       ssh_friendly_failure
@@ -153,10 +173,22 @@ doctor_run() {
   gauth_init_paths
   config_init
   settings_load
-  accounts_init
+  profiles_init
   DOCTOR_FAILURES=0
 
-  ui_header "gauth doctor $GAUTH_VERSION"
+  if ui_has_gum && ui_interactive; then
+    "$GAUTH_GUM_BIN" style \
+      --border rounded \
+      --border-foreground "$UI_BORDER_HEX" \
+      --foreground "$UI_ACCENT_HEX" \
+      --bold \
+      --padding "1 2" \
+      --margin "1 0" \
+      -- "gauth doctor $GAUTH_VERSION" >&2
+  else
+    ui_header "gauth doctor $GAUTH_VERSION"
+  fi
+
   ui_section "Environment"
   printf '  %-18s %s\n' "OS" "$(uname -s 2>/dev/null) $(uname -m 2>/dev/null)"
   printf '  %-18s %s\n' "Bash" "$BASH_VERSION"
@@ -189,20 +221,24 @@ doctor_run() {
   ui_section "Files and permissions"
   doctor_check_mode "$GAUTH_SSH_DIR" "SSH directory" 700
   doctor_check_mode "$GAUTH_SSH_CONFIG" "SSH config" 600
-  doctor_check_mode "$GAUTH_ACCOUNTS_FILE" "Accounts registry" 600
+  doctor_check_mode "$GAUTH_PROFILES_FILE" "Profiles registry" 600
   doctor_check_mode "$GAUTH_SETTINGS_FILE" "Settings" 600
+  doctor_check_owner "$GAUTH_SSH_DIR" "SSH directory"
+  doctor_check_owner "$GAUTH_SSH_CONFIG" "SSH config"
+  doctor_check_owner "$GAUTH_PROFILES_FILE" "Profiles registry"
+  doctor_check_owner "$GAUTH_SETTINGS_FILE" "Settings"
 
-  ui_section "Accounts"
+  ui_section "Profiles"
   local count
-  count="$(account_count)"
+  count="$(profile_count)"
   if [ "$count" -eq 0 ]; then
-    doctor_warn "No accounts configured yet"
+    doctor_warn "No profiles configured yet"
   else
     local name
     while IFS= read -r name; do
       [ -n "$name" ] || continue
-      doctor_check_account "$name" "$test_connection"
-    done < <(account_list_names)
+      doctor_check_profile "$name" "$test_connection"
+    done < <(profile_list_names)
   fi
 
   ui_section "Repository"
@@ -218,9 +254,32 @@ doctor_run() {
 
   printf '\n'
   if [ "$DOCTOR_FAILURES" -eq 0 ]; then
-    ui_success "Doctor finished with no blocking problems."
+    if ui_has_gum && ui_interactive; then
+      "$GAUTH_GUM_BIN" style \
+        --border rounded \
+        --border-foreground "$UI_SUCCESS_HEX" \
+        --foreground "$UI_SUCCESS_HEX" \
+        --bold \
+        --padding "1 2" \
+        --margin "1 0" \
+        -- "All checks passed!" >&2
+    else
+      ui_success "Doctor finished with no blocking problems."
+    fi
     return 0
   fi
-  ui_error "Doctor found $DOCTOR_FAILURES blocking problem(s)."
+
+  if ui_has_gum && ui_interactive; then
+    "$GAUTH_GUM_BIN" style \
+      --border rounded \
+      --border-foreground "$UI_ERROR_HEX" \
+      --foreground "$UI_ERROR_HEX" \
+      --bold \
+      --padding "1 2" \
+      --margin "1 0" \
+      -- "Doctor found $DOCTOR_FAILURES blocking problem(s)." >&2
+  else
+    ui_error "Doctor found $DOCTOR_FAILURES blocking problem(s)."
+  fi
   return 1
 }

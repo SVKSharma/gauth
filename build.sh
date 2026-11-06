@@ -5,7 +5,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")" && pwd -P)"
 DIST="$ROOT/dist"
 OUT="$DIST/gauth"
-VERSION="0.1.0"
+VERSION="0.2.0"
 
 MODULES=(
   common
@@ -15,7 +15,7 @@ MODULES=(
   ssh
   sshconfig
   git
-  account
+  profile
   settings
   doctor
   commands

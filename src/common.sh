@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Shared constants and small, dependency-free helpers.
 
-GAUTH_VERSION="0.1.0"
+GAUTH_VERSION="0.2.0"
 GAUTH_PROGRAM="gauth"
 GAUTH_DEFAULT_HOST="github.com"
 GAUTH_DEFAULT_KEY_TYPE="ed25519"
@@ -26,16 +26,45 @@ gauth_command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+# Prompts read keys from stdin and draw on stderr. Callers capture a prompt's
+# stdout, so stdout being a pipe does not make the session non-interactive.
 gauth_is_tty() {
-  [ -t 0 ] && [ -t 1 ]
+  [ -t 0 ] && [ -t 2 ]
 }
 
 gauth_require_tty() {
   if ! gauth_is_tty; then
-    ui_error "This command needs an interactive terminal."
+    ui_error "This command needs an interactive terminal (stdin and stderr)."
     return 1
   fi
   return 0
+}
+
+gauth_is_writable() {
+  local path="$1"
+  [ -w "$path" ] && return 0
+  [ -w "$(dirname "$path")" ] && return 0
+  return 1
+}
+
+gauth_file_uid() {
+  local path="$1"
+  case "$(uname -s 2>/dev/null)" in
+    Darwin|FreeBSD|OpenBSD|NetBSD) stat -f '%u' "$path" 2>/dev/null ;;
+    *) stat -c '%u' "$path" 2>/dev/null ;;
+  esac
+}
+
+# gauth never escalates privileges. When a file was created by another user
+# (usually an earlier sudo run), say exactly what to run instead of failing
+# with a bare permission error.
+gauth_permission_hint() {
+  local path="$1"
+  local owner
+  owner="$(gauth_file_uid "$path" 2>/dev/null || printf '?')"
+  ui_error "Cannot modify $path (owner uid $owner, you are uid $(id -u))."
+  ui_info "gauth never runs sudo. Fix ownership yourself with:"
+  printf '  sudo chown %s:%s %s\n' "$(id -u)" "$(id -g)" "$path" >&2
 }
 
 gauth_log() {
@@ -83,7 +112,7 @@ gauth_is_true() {
   return 1
 }
 
-validate_account_name() {
+validate_profile_name() {
   local name="$1"
   [ -n "$name" ] || return 1
   [ "${#name}" -le 64 ] || return 1
@@ -251,7 +280,8 @@ gauth_init_paths() {
   GAUTH_SSH_DIR="${GAUTH_SSH_DIR:-$HOME/.ssh}"
   GAUTH_SSH_CONFIG="${GAUTH_SSH_CONFIG:-$GAUTH_SSH_DIR/config}"
 
-  GAUTH_ACCOUNTS_FILE="$GAUTH_CONFIG_HOME/accounts.tsv"
+  GAUTH_PROFILES_FILE="$GAUTH_CONFIG_HOME/profiles.tsv"
+  GAUTH_LEGACY_PROFILES_FILE="$GAUTH_CONFIG_HOME/accounts.tsv"
   GAUTH_SETTINGS_FILE="$GAUTH_CONFIG_HOME/settings.conf"
   GAUTH_BACKUP_DIR="$GAUTH_STATE_HOME/backups"
   GAUTH_LOG_FILE="$GAUTH_STATE_HOME/gauth.log"
@@ -264,6 +294,11 @@ gauth_init_paths() {
 }
 
 gauth_find_gum() {
+  # Explicit opt-out, handy for tests and for users who prefer the ANSI UI.
+  if [ "${GAUTH_NO_GUM:-0}" = "1" ]; then
+    GAUTH_GUM_BIN=""
+    return 1
+  fi
   if [ -n "${GAUTH_GUM:-}" ] && [ -x "$GAUTH_GUM" ]; then
     GAUTH_GUM_BIN="$GAUTH_GUM"
     return 0

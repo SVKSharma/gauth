@@ -5,7 +5,7 @@ GitHub account. It handles the parts that are easy to forget: SSH keys, SSH
 aliases, permissions, `ssh-agent`, connection tests, local Git identity, and
 the remote URL.
 
-It is built for Linux and macOS, works with multiple GitHub accounts, and is
+It is built for Linux and macOS, works with multiple GitHub profiles, and is
 written in Bash with a modern [`gum`](https://github.com/charmbracelet/gum) UI.
 
 ```
@@ -14,14 +14,14 @@ gauth
 
 ## Why
 
-Connecting Git to GitHub once is tedious. Doing it for a second account means
+Connecting Git to GitHub once is tedious. Doing it for a second profile means
 remembering aliases, key names, `~/.ssh/config` rules, and remote URL formats.
-gauth walks through the setup once, records the account, and lets you reuse it
+gauth walks through the setup once, records the profile, and lets you reuse it
 for every repository.
 
 ## Features
 
-- Interactive menu for adding, viewing, selecting, and removing accounts
+- Interactive menu for adding, viewing, selecting, and removing profiles
 - Guided repository setup from an HTTPS or SSH GitHub URL
 - ed25519 (default), RSA 4096, or ECDSA 384 keys
 - Optional passphrase, handled by `ssh-keygen` directly
@@ -80,8 +80,8 @@ delete `~/.config/gauth`, SSH keys, SSH config entries, or repositories.
 ## Quick start
 
 ```bash
-# Add your first account
-gauth account add
+# Add your first profile
+gauth profile add
 
 # In a project, connect the current directory
 gauth init
@@ -90,36 +90,52 @@ gauth init
 gauth
 ```
 
-`gauth init` accepts an existing account and an optional URL:
+`gauth init` accepts an existing profile and an optional URL:
 
 ```bash
-gauth init --account work --repo https://github.com/owner/repo.git
-gauth init --account personal --repo git@github.com:owner/repo.git
+gauth init --profile work --repo https://github.com/owner/repo.git
+gauth init --profile personal --repo git@github.com:owner/repo.git
 ```
 
-The resulting remote is based on the account's alias:
+The resulting remote is based on the profile's alias:
 
 ```
 git@github.com-work:owner/repo.git
 ```
+
+### Navigation
+
+The interactive menu and the profile wizard use vim-style keys:
+
+| Keys | Action |
+| --- | --- |
+| `j` / `k`, ↓ / ↑ | Move down / up |
+| `h` / `l`, ← / → | Go back / forward a step |
+| `Shift+H`, `Esc` | Back (also leaves the main menu) |
+| `Shift+L` | Forward through your menu history |
+| `g` / `G` | Jump to the first / last item |
+| `Enter` | Select / confirm |
+
+The wizard draws a commit-graph timeline so you can see which step you are on,
+and `Shift+L` replays the last actions you took from the main menu.
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
 | `gauth` | Interactive menu |
-| `gauth init [--account NAME] [--repo URL] [--yes] [--no-test]` | Configure the current repository |
-| `gauth account list` | List configured accounts |
-| `gauth account add` | Add an account |
-| `gauth account show` | View an account |
-| `gauth account remove` | Remove an account |
+| `gauth init [--profile NAME] [--repo URL] [--yes] [--no-test]` | Configure the current repository |
+| `gauth profile list` | List configured profiles |
+| `gauth profile add` | Add a profile |
+| `gauth profile show` | View a profile |
+| `gauth profile remove` | Remove a profile |
 | `gauth settings` | Change defaults |
-| `gauth doctor [--test] [--fix]` | Diagnose the installation and optionally test accounts |
+| `gauth doctor [--test] [--fix]` | Diagnose the installation and optionally test profiles |
 | `gauth version` | Print the version |
 
 ## What gauth changes
 
-- Creates `~/.ssh/id_<type>_<account>` and its `.pub` file if needed
+- Creates `~/.ssh/id_<type>_<profile>` and its `.pub` file if needed
 - Ensures `~/.ssh` is `700`, private keys are `600`, public keys are `644`
 - Adds a managed block to `~/.ssh/config`:
 
@@ -133,12 +149,12 @@ Host github.com-work
 # <<< gauth:github.com-work <<<
 ```
 
-- Stores account metadata in `~/.config/gauth/accounts.tsv`
+- Stores profile metadata in `~/.config/gauth/profiles.tsv`
 - Stores defaults in `~/.config/gauth/settings.conf`
 - Writes backups under `~/.local/state/gauth/backups/`
 - Writes ssh-agent environment files under `~/.local/state/gauth/`
 - Sets **local** Git config only: `user.name`, `user.email`,
-  `remote.origin.url`, and `gauth.account`
+  `remote.origin.url`, and `gauth.profile`
 
 gauth never commits, pushes, changes your global Git identity, or rewrites
 existing SSH keys without confirmation.
@@ -209,12 +225,12 @@ Layout:
 ```
 src/common.sh      constants, validation, paths, atomic helpers
 src/ui.sh          gum wrappers and ANSI fallback
-src/config.sh      settings and account registry
+src/config.sh      settings and profile registry
 src/clipboard.sh   cross-platform clipboard + OSC 52
 src/ssh.sh         key generation, agent, ssh -T
 src/sshconfig.sh   managed SSH config blocks
 src/git.sh         URL parsing and local git config
-src/account.sh     account wizard and removal
+src/profile.sh     profile wizard and removal
 src/settings.sh    settings menu
 src/doctor.sh      diagnostics
 src/commands.sh    init/menu commands
@@ -224,7 +240,7 @@ src/main.sh        entry point
 ## Limitations in v1
 
 - GitHub.com only (not GitHub Enterprise)
-- One SSH key per account
+- One SSH key per profile
 - No automatic GitHub API key upload; you paste the key in the browser
 - No commit/push automation
 - No shell completion yet
