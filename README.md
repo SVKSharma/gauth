@@ -329,6 +329,6 @@ MIT. See [LICENSE](LICENSE).
 
 <div align="center">
 
-Built with ❤️ by [the Bash CLI community](https://github.com/SVKSharma)
+Built with 💚 by Showvik
 
 </div>
