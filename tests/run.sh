@@ -322,6 +322,15 @@ test_ui_fallback() {
   fi
 }
 
+test_repo_prompt_url_cancel() {
+  local rc=0
+  printf ':cancel\n' | repo_prompt_url >/dev/null 2>&1 || rc=$?
+  assert_eq "1" "$rc" "clone URL prompt cancels on :cancel"
+  rc=0
+  printf ':back\n' | repo_prompt_url >/dev/null 2>&1 || rc=$?
+  assert_eq "1" "$rc" "clone URL prompt cancels on :back"
+}
+
 test_banner_and_success() {
   assert_eq "#9ece6a" "$UI_SUCCESS_HEX" "success uses the green palette"
   if [ "$UI_SUCCESS_HEX" != "$UI_ACCENT_HEX" ] && [ "$UI_SUCCESS_HEX" != "$UI_ERROR_HEX" ]; then
@@ -980,6 +989,7 @@ run_test "build and CLI" test_build_and_cli
 run_test "validation" test_validation
 run_test "GitHub URLs" test_github_urls
 run_test "UI fallback" test_ui_fallback
+run_test "Clone URL prompt cancel" test_repo_prompt_url_cancel
 run_test "banner and success" test_banner_and_success
 run_test "sudo authentication" test_sudo_auth
 run_test "settings" test_settings

@@ -65,14 +65,17 @@ cmd_version() {
 }
 
 repo_prompt_url() {
-  local repo_url=""
+  local repo_url="" read_rc=0
   while :; do
-    if repo_url="$(ui_input "GitHub repository URL" "https://github.com/owner/repo.git" "")"; then
-      :
-    else
-      [ "$?" -eq 2 ] && continue
-      return 1
-    fi
+    # Esc and Ctrl-C both leave this prompt (they must not re-prompt forever).
+    ui_hint "Esc: cancel · Ctrl-C: cancel · :cancel"
+    read_rc=0
+    repo_url="$(ui_input "GitHub repository URL" "https://github.com/owner/repo.git" "")" || read_rc=$?
+    case "$read_rc" in
+      0) : ;;
+      2|4) ui_info "Clone cancelled."; return 1 ;;
+      *) return 1 ;;
+    esac
     if git_parse_github_url "$repo_url"; then
       printf '%s\n' "$repo_url"
       return 0
