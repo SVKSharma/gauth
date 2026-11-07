@@ -30,8 +30,10 @@ main() {
   case "$command" in
     menu) main_menu ;;
     init|connect) cmd_init "$@" ;;
+    clone) cmd_clone "$@" ;;
     profile|profiles) cmd_profile "$@" ;;
     account|accounts) cmd_profile "$@" ;;  # v0.1 name
+    hook|guard) cmd_hook "$@" ;;
     settings) settings_menu ;;
     doctor) doctor_run "$@" ;;
     *)

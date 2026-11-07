@@ -28,19 +28,36 @@ Options:
   --libexecdir DIR   Override the gum directory (default: PREFIX/libexec/gauth)
   --no-gum           Do not install or check for gum
   --gum-version VER  Pin the gum release (default: $GUM_VERSION)
-  --uninstall        Remove the gauth binary and private gum copy
+  --uninstall        Run the complete uninstaller (binary, config, keys)
   --help             Show this help
 
 A user-local install needs no sudo:
   ./install.sh --prefix "\$HOME/.local"
 
-gauth never deletes SSH keys, SSH config, or ~/.config/gauth on uninstall.
+For a complete removal, run ./uninstall.sh (or ./install.sh --uninstall,
+which delegates to it).
 EOF
 }
 
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+  C_SUCCESS=$'\033[1;32m'
+  C_ACCENT=$'\033[1;36m'
+  C_WARN=$'\033[1;33m'
+  C_ERROR=$'\033[1;31m'
+  C_RESET=$'\033[0m'
+else
+  C_SUCCESS=""
+  C_ACCENT=""
+  C_WARN=""
+  C_ERROR=""
+  C_RESET=""
+fi
+
 log() { printf '%s\n' "$*"; }
-warn() { printf '! %s\n' "$*" >&2; }
-die() { printf 'x %s\n' "$*" >&2; exit 1; }
+warn() { printf '%s! %s%s\n' "$C_WARN" "$*" "$C_RESET" >&2; }
+die() { printf '%s✖ %s%s\n' "$C_ERROR" "$*" "$C_RESET" >&2; exit 1; }
+success() { printf '%s✔ %s%s\n' "$C_SUCCESS" "$*" "$C_RESET"; }
+note() { printf '%s%s%s\n' "$C_ACCENT" "$*" "$C_RESET"; }
 
 trim_newline() {
   local value="$1"
@@ -237,6 +254,7 @@ uninstall_gauth() {
     log "Removed $LIBEXECDIR/gum"
   fi
   log "Kept ~/.config/gauth, ~/.ssh keys, and SSH config entries."
+  note "Run ./uninstall.sh for a complete removal."
 }
 
 while [ "$#" -gt 0 ]; do
@@ -280,6 +298,11 @@ LIBEXECDIR="${LIBEXECDIR:-$PREFIX/libexec/gauth}"
 trap cleanup EXIT INT TERM
 
 if [ "$DO_UNINSTALL" -eq 1 ]; then
+  if [ -f "$ROOT/uninstall.sh" ]; then
+    note "Starting the complete gauth uninstaller ..."
+    exec bash "$ROOT/uninstall.sh" --prefix "$PREFIX" --bindir "$BINDIR" --libexecdir "$LIBEXECDIR"
+  fi
+  warn "uninstall.sh is missing; removing only the installed binary and gum."
   uninstall_gauth
   exit 0
 fi
@@ -304,3 +327,4 @@ case ":${PATH:-}:" in
 esac
 
 log "Run: gauth"
+success "gauth installed successfully: $BINDIR/gauth"

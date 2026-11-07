@@ -343,17 +343,46 @@ profile_alias_in_use() {
   return 1
 }
 
+profile_name_for_alias() {
+  local wanted="$1"
+  local n a g e k kt c v
+  [ -n "$wanted" ] || return 1
+  [ -f "$GAUTH_PROFILES_FILE" ] || return 1
+  while IFS=$'\t' read -r n a g e k kt c v || [ -n "$n" ]; do
+    case "$n" in ''|'#'*) continue ;; esac
+    if [ "$a" = "$wanted" ]; then
+      printf '%s\n' "$n"
+      return 0
+    fi
+  done <"$GAUTH_PROFILES_FILE"
+  return 1
+}
+
 profile_pick() {
   local header="${1:-Select a profile}"
   local allow_new="${2:-0}"
+  local preferred="${3:-}"
   local -a names=()
   local name
   while IFS= read -r name; do
     [ -n "$name" ] && names+=("$name")
   done < <(profile_list_names)
 
+  # Put the currently selected profile first so switching is quick.
+  if [ -n "$preferred" ] && [ "${#names[@]}" -gt 1 ]; then
+    local -a ordered=()
+    for name in "${names[@]}"; do
+      [ "$name" = "$preferred" ] && ordered+=("$name")
+    done
+    for name in "${names[@]}"; do
+      [ "$name" = "$preferred" ] && continue
+      ordered+=("$name")
+    done
+    names=("${ordered[@]}")
+  fi
+
   if [ "${#names[@]}" -eq 0 ] && [ "$allow_new" -eq 0 ]; then
-    ui_warn "No profiles configured yet."
+    profile_none_message
     return 1
   fi
   if [ "${#names[@]}" -eq 1 ] && [ "$allow_new" -eq 0 ]; then
@@ -411,7 +440,7 @@ profile_list_cmd() {
   local count
   count="$(profile_count)"
   if [ "$count" -eq 0 ]; then
-    ui_warn "No profiles configured yet."
+    profile_none_message
     return 1
   fi
 
