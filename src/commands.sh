@@ -645,7 +645,7 @@ main_menu() {
       "$repo_label" \
       "Clone a GitHub repository" \
       "Add profile" \
-      "View / switch profile" \
+      "View saved profiles" \
       "Remove profile" \
       "Settings" \
       "Doctor" \
@@ -658,7 +658,7 @@ main_menu() {
           "$repo_label"|"Set up this repository"|"Connect this repository to GitHub"|"Work on this repository (switch profile)"|"Select a profile for this repository") action="repo" ;;
           "Clone a GitHub repository") action="clone" ;;
           "Add profile") action="add" ;;
-          "View / switch profile") action="view" ;;
+          "View saved profiles") action="view" ;;
           "Remove profile") action="remove" ;;
           "Settings") action="settings" ;;
           "Doctor") action="doctor" ;;

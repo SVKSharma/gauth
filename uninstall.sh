@@ -49,12 +49,14 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
   C_ACCENT=$'\033[1;36m'
   C_WARN=$'\033[1;33m'
   C_ERROR=$'\033[1;31m'
+  C_BOLD=$'\033[1m'
   C_RESET=$'\033[0m'
 else
   C_SUCCESS=""
   C_ACCENT=""
   C_WARN=""
   C_ERROR=""
+  C_BOLD=""
   C_RESET=""
 fi
 
@@ -125,10 +127,58 @@ require_admin_auth() {
   die "Too many failed authentication attempts; nothing was removed."
 }
 
+confirm_permanent_removal() {
+  printf '\n' >&2
+  printf '%s%s⚠️  DANGER: THIS WILL REMOVE EVERYTHING GAUTH HAS CREATED FROM THIS DEVICE.%s\n' "$C_ERROR" "$C_BOLD" "$C_RESET" >&2
+  printf '%sThis includes your gauth-managed SSH config blocks, SSH keys, config, state, and installed files.%s\n' "$C_WARN" "$C_RESET" >&2
+  printf '%sThis action is permanent and cannot be undone.%s\n' "$C_ERROR" "$C_RESET" >&2
+  printf '%sPress Enter to confirm permanent uninstallation, Esc or Ctrl-C to cancel.%s\n' "$C_ACCENT" "$C_RESET" >&2
+
+  local key="";
+  if [ -t 0 ] && [ -r /dev/tty ]; then
+    local saved
+    saved="$(stty -g </dev/tty 2>/dev/null)" || saved=""
+    if [ -n "$saved" ]; then
+      stty -echo -icanon min 1 time 0 -isig </dev/tty 2>/dev/null || saved=""
+      IFS= read -rsn1 key </dev/tty 2>/dev/null || key=""
+      stty "$saved" </dev/tty 2>/dev/null || true
+      case "$key" in
+        $'\033'|$'\003')
+          printf '\n' >&2
+          warn "Cancelled; nothing was removed."
+          exit 1
+          ;;
+        $'\n'|$'\r'|"")
+          return 0
+          ;;
+        *)
+          return 0
+          ;;
+      esac
+    fi
+  fi
+
+  IFS= read -rsn1 key 2>/dev/null || key=""
+  case "$key" in
+    $'\033'|$'\003')
+      printf '\n' >&2
+      warn "Cancelled; nothing was removed."
+      exit 1
+      ;;
+    $'\n'|$'\r'|"")
+      return 0
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 cleanup() {
   [ -n "${KEYS_FILE:-}" ] && rm -f "$KEYS_FILE" "$KEYS_FILE.dedup" "$KEYS_FILE.external"
 }
-trap cleanup EXIT INT TERM
+trap 'printf "\n" >&2; warn "Cancelled; nothing was removed."; exit 1' INT
+trap cleanup EXIT TERM
 
 safe_remove_path() {
   local path="$1"
@@ -383,6 +433,7 @@ fi
 # Authentication comes after confirmation but before the first deletion, so a
 # cancelled prompt leaves everything untouched.
 require_admin_auth
+confirm_permanent_removal
 
 FAILED=0
 LEGACY_KEPT=0

@@ -719,7 +719,7 @@ test_pre_push_guard() {
   unset FAKE_GIT_LOG GAUTH_HOOK_NO_PROMPT
 }
 
-test_profile_select_view_switches() {
+test_profile_select_view_is_read_only() {
   save_repo_profile work "github.com-work" "work@example.com" || fail "save view profile"
   write_ssh_config
   sshconfig_upsert "github.com-work" "$GAUTH_SSH_DIR/id_ed25519_work" >/dev/null 2>&1
@@ -731,16 +731,20 @@ test_profile_select_view_switches() {
   export FAKE_GIT_LOG="$WORK/view-git.log"
   : >"$FAKE_GIT_LOG"
 
-  printf 'y\n' | profile_select_view >/dev/null 2>&1 || {
-    fail "view/select switches the repository profile"
+  out="$(printf 'work\n' | profile_select_view 2>&1)" || {
+    fail "view/select should display a saved profile"
     return
   }
-  pass "view/select switches the repository profile"
-  assert_ok "view/select rewrites the remote" \
+  pass "view/select displays a saved profile"
+  case "$out" in
+    *"Profile: work"*) pass "view/select shows the selected profile by name" ;;
+    *) fail "view/select shows the selected profile by name" "$out" ;;
+  esac
+  assert_fail "view/select does not rewrite the remote" \
     grep -q '^config --local remote.origin.url git@github.com-work:owner/repo.git$' "$FAKE_GIT_LOG"
-  assert_ok "view/select records the profile" \
+  assert_fail "view/select does not record the profile" \
     grep -q '^config --local gauth.profile work$' "$FAKE_GIT_LOG"
-  assert_ok "view/select installs the guard" git_pre_push_hook_installed "$FAKE_GIT_DIR/hooks"
+  assert_fail "view/select does not install the guard" git_pre_push_hook_installed "$FAKE_GIT_DIR/hooks"
 
   unset FAKE_GIT_IS_REPO FAKE_GIT_DIR FAKE_GIT_REMOTE_URL FAKE_GIT_LOG
 }
@@ -959,8 +963,17 @@ test_uninstall_script() {
     fail "wrong password leaves gauth installed"
   fi
 
-  printf 'secret\n' | run_uninstall >/dev/null 2>&1 || rc=$?
+  local out=""
+  out="$(printf 'secret\n\n' | run_uninstall 2>&1)" || rc=$?
+  case "$out" in
+    *"THIS WILL REMOVE EVERYTHING"*|*"WARNING"*) pass "uninstaller warns before permanent removal" ;;
+    *) fail "uninstaller warns before permanent removal" "$out" ;;
+  esac
   assert_eq "0" "$rc" "uninstaller exits successfully"
+
+  local cancel_rc=0
+  out="$(printf '\033\n' | run_uninstall 2>&1)" || cancel_rc=$?
+  if [ "$cancel_rc" -ne 0 ]; then pass "uninstaller cancels on Esc"; else fail "uninstaller cancels on Esc" "$out"; fi
 
   if [ ! -e "$prefix/bin/gauth" ]; then pass "uninstaller removes the binary"; else fail "uninstaller removes the binary"; fi
   if [ ! -e "$prefix/libexec/gauth/gum" ]; then pass "uninstaller removes private gum"; else fail "uninstaller removes private gum"; fi
@@ -1003,7 +1016,7 @@ run_test "existing origin reused" test_existing_origin_reused
 run_test "pre-push hook installation" test_pre_push_hook_install
 run_test "pre-push guard" test_pre_push_guard
 run_test "profile select for repository" test_profile_select_for_repo
-run_test "profile view/select switches repository" test_profile_select_view_switches
+run_test "profile view/select is read-only" test_profile_select_view_is_read_only
 run_test "clone repository" test_clone_repository
 run_test "duplicate clone safeguard" test_clone_duplicate_safeguard
 run_test "existing directory clone safeguard" test_clone_existing_directory_safeguard

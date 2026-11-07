@@ -105,7 +105,7 @@ profile_add() {
               ui_kv "Email" "$PROFILE_EMAIL"
               ui_kv "Key" "$PROFILE_KEY"
             fi
-            ui_hint "Choose a different name, or use 'View / switch profile' to reuse it."
+            ui_hint "Choose a different name, or use 'View saved profiles' to inspect it."
             continue
           fi
           name="$candidate"
@@ -358,7 +358,7 @@ profile_add() {
   # Pre-flight: re-check everything after the wizard, before creating any files.
   if profile_exists "$name"; then
     ui_error "Profile '$name' already exists; nothing was changed."
-    ui_info "Use 'View / switch profile' to reuse it, or choose another name."
+    ui_info "Use 'View saved profiles' to inspect it, or choose another name."
     return 1
   fi
   if profile_alias_in_use "$alias" ""; then
@@ -540,48 +540,17 @@ profile_show_cmd() {
 }
 
 profile_select_view() {
-  local name current=""
+  local name
   if [ "$(profile_count)" -eq 0 ]; then
     profile_none_message
     return 1
   fi
 
-  if ! git_is_repo; then
-    name="$(profile_pick "View which profile?" 0)" || return 1
-    profile_render_header "$name"
-    profile_print "$name"
-    ui_hint "Not inside a git repository, so this profile was only displayed."
-    return 0
-  fi
-
-  current="$(git_get_gauth_profile 2>/dev/null || true)"
-
-  if ! repo_detect_github_origin; then
-    name="$(profile_pick "View which profile?" 0 "$current")" || return 1
-    profile_render_header "$name"
-    profile_print "$name"
-    ui_section "Current repository"
-    ui_kv "Status" "$(git_repo_summary)"
-    ui_hint "No GitHub origin detected; use 'Connect this repository to GitHub' first."
-    return 0
-  fi
-
-  # Inside a GitHub repository: choosing a profile switches this repository
-  # (remote alias, local Git identity, gauth.profile, and the pre-push guard).
-  ui_section "Profile for this repository"
-  ui_kv "Repository" "$REPO_OWNER/$REPO_REPO"
-  ui_kv "Origin" "$REPO_ORIGIN_URL"
-  ui_kv "Selected profile" "${current:-none}"
-  name="$(profile_pick "Switch to which profile?" 0 "$current")" || return 1
-
-  if [ "$name" = "$current" ]; then
-    profile_render_header "$name"
-    profile_print "$name"
-    ui_success "Profile '$name' is already selected for this repository."
-    return 0
-  fi
-
-  repo_apply "$name" "$REPO_ORIGIN_URL" 0 1
+  name="$(profile_pick "View saved profiles" 0)" || return 1
+  profile_render_header "$name"
+  profile_print "$name"
+  ui_info "This view is read-only; it does not switch repositories or change Git settings."
+  return 0
 }
 
 profile_select_for_repo() {

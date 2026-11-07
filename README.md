@@ -45,9 +45,37 @@
 
 ---
 
+## 🧭 How gauth works
+
+`gauth` is a helper for the moments where Git and GitHub are connected by SSH keys, aliases, and local identity. It does not rewrite your global Git config blindly; it keeps the work focused on the current repository and the selected profile.
+
+The app has a few clear operating modes:
+
+- **Interactive menu** — run `gauth` and pick the current operation from a guided menu.
+- **Profile flow** — add, inspect, and remove saved profiles.
+- **Repository flow** — initialize a repo, connect it to GitHub, or attach a selected profile to an existing repo.
+- **Clone flow** — clone a repository through the chosen profile's SSH alias and immediately configure the local identity and guard.
+- **Guard flow** — install a pre-push hook that blocks wrong-profile pushes and shows the correct next step.
+
+**This is the flow of gauth:**
+
+**You start with a repo situation, and gauth tells you what to do next.**
+
+1. **Start a fresh repo and connect it with GitHub** — if you are not inside a Git repo yet, the first option becomes **Set up this folder (git init + GitHub)**.
+2. **Clone an existing GitHub repo with gauth** — if you want to clone a repo and set up the right profile for it, gauth guides you through that flow.
+3. **Switch profile anytime** — if you already have a GitHub repo open and want to change the active profile, the first option becomes **Work on this repository (switch profile)**.
+4. **You already cloned the repo yourself** — if the repo is already there, open it and run `gauth`; it will let you pick the profile for that repo without changing anything else.
+
+**The menu adapts to your current state:**
+
+- **Outside a Git repo:** the first option becomes **Set up this folder (git init + GitHub)**.
+- **Inside a repo without a GitHub origin:** the first option becomes **Connect this repository to GitHub**.
+- **Inside a GitHub repo:** the first option becomes **Work on this repository (switch profile)**.
+- **No profiles exist yet:** the menu will explain that no profiles are configured and offer to add one.
+
 ## 🎯 Interactive mode
 
-Run `gauth` to open the interactive menu. This is the primary way to use the tool — you'll be presented with a vim‑style menu where you can navigate with **j/k** or **↑/↓**, move back with **h** or **←**, go forward with **l** or **→**, press **Enter** to select, and **q** to quit.
+Run `gauth` to open the interactive menu. This is the primary way to use the tool. The menu is vim-style: move with **j/k** or **↑/↓**, go back with **h** or **←**, go forward with **l** or **→**, press **Enter** to select, and **q** to quit.
 
 ### Root menu
 
@@ -55,111 +83,164 @@ Run `gauth` to open the interactive menu. This is the primary way to use the too
 gauth
 ```
 
-You'll see:
+You will see:
 
-- **Work on this repository (switch profile)** — an existing GitHub repo: choose the profile for this work session, reusing the current origin
-- **Connect this repository to GitHub** — a git repo without a GitHub origin: choose a profile and provide the GitHub URL
-- **Set up this folder (git init + GitHub)** — initialize a new repo and connect to GitHub
-- **Clone a GitHub repository** — clone with a profile, then configure the checkout automatically
-- **Add profile** — create a new SSH key + Git identity (wizard‑driven)
-- **View / switch profile** — view a profile and make it the current profile for the repository you are in
-- **Remove profile** — authenticate with sudo, then archive or reuse an existing key
-- **Settings** — change defaults (key type, alias prefix, branch)
-- **Doctor** — check the installation, the pre-push guard, and optionally test profiles
-- **Help** — show this help
-- **Exit** — quit the app
+- **Work on this repository (switch profile)** — the folder is already a GitHub repo; select a profile for this work session.
+- **Connect this repository to GitHub** — the folder is a repo but has no GitHub origin yet; pick a profile and connect it.
+- **Set up this folder (git init + GitHub)** — initialize a repo in the current folder, then connect it to GitHub.
+- **Clone a GitHub repository** — clone through a saved profile's SSH alias, then configure the repo automatically.
+- **Add profile** — create a new SSH key and Git identity using the wizard.
+- **View saved profiles** — show the names of saved profiles and then inspect the details of one saved profile without changing repo state.
+- **Remove profile** — authenticate with sudo, then archive or reuse an existing key.
+- **Settings** — change defaults such as key type, alias prefix, and branch.
+- **Doctor** — check installation health, guard status, and profile readiness.
+- **Help** — show usage information.
+- **Exit** — quit the app.
 
-The first item changes with the current directory: it says **Set up this folder** outside a repository, **Work on this repository** when a GitHub origin exists, and **Connect this repository to GitHub** when a repository has no GitHub origin yet. If no profiles exist, **View / switch profile** explains that no accounts are configured and offers to add one.
+The first item is intentionally context-aware. That is the major behavior change in the current flow: it changes from **Set up this folder** to **Connect this repository to GitHub** to **Work on this repository** depending on the repo state.
 
 ### Navigation tips
 
 - **j / k** or **↑ / ↓** — move up/down
 - **h** or **←** — go back one step/page
-- **l** or **→** — go forward (opens the highlighted item on menu pages, or moves to the next wizard step)
-- **Esc** — go back (for non‑vim users), including inside wizard text prompts
+- **l** or **→** — go forward (open the highlighted item or advance a wizard step)
+- **Esc** — go back, including inside wizard text prompts
 - **Ctrl‑C** — cancel and return to the menu
 - **Enter** — select / confirm
 - **g** / **G** — jump to first / last item
 - **q** — quit the whole app
 
-At the root menu, **h**, **Esc**, and the left arrow never close gauth: they walk back through your action history or show a hint. Only **q** (or the **Exit** item) quits. When there is nowhere to go back or forward, the menu says so and stays open; a repeated **l**/→ reminds you that **Enter** selects an item.
+At the root menu, **h**, **Esc**, and the left arrow never close gauth: they walk back through your action history or show a hint. Only **q** or **Exit** quits. When there is nowhere to go back or forward, the menu tells you and stays open.
 
-The profile wizard draws a commit‑graph timeline and records the value chosen at each completed step, for example `01 Profile name [demo]`. Inside a wizard text prompt, press `Esc` to go back or `Ctrl‑C` to cancel without pressing `Enter`. You can also type `:back`, `:forward`, or `:cancel`; menu steps include `‹ Back` and `✕ Cancel` items.
+The profile wizard draws a commit-graph style timeline and records the value selected for each step, for example `01 Profile name [demo]`. Inside a wizard text prompt, press `Esc` to go back or `Ctrl‑C` to cancel without pressing `Enter`. You can also type `:back`, `:forward`, or `:cancel`; menu steps include `‹ Back` and `✕ Cancel` items.
 
 ---
 
-## 🚀 Quick start
+## 🚀 Recommended workflow: use the interactive menu first
 
-### Adding your first profile
+The best way to use gauth is to start in the directory where you want to work and run:
 
 ```bash
-gauth profile add
+gauth
 ```
 
-Follow the wizard: profile name, SSH alias, git name, email, key type, key file name, passphrase. The SSH key is saved under `~/.ssh/gauth/id_<type>_<profile>`.
+From there, the app decides what to do for you based on the current directory and repository state. This is the primary UX of the project, and the command-line helpers are there mostly as convenience shortcuts.
 
-### In a project, connect to GitHub
+### Typical first-time flow
 
-There are three common situations:
+1. Run `gauth` in the folder you want to work in.
+2. If you have no saved profile yet, choose **Add profile**.
+3. The wizard asks for:
+   - profile name
+   - SSH alias
+   - Git name
+   - email
+   - key type
+   - key file name
+   - optional passphrase flow
+4. After the profile exists, the menu continues with the correct repo action for your state.
+5. gauth configures the SSH alias, Git identity, remote, and guard for you.
 
-**New local folder** — no git repository yet:
+### The interactive flow is context-aware
+
+This is the main thing to understand:
+
+- **Outside a Git repo:** the first option becomes **Set up this folder (git init + GitHub)**.
+- **Inside a repo without a GitHub origin:** the first option becomes **Connect this repository to GitHub**.
+- **Inside a GitHub repo:** the first option becomes **Work on this repository (switch profile)**.
+- **No profiles exist yet:** the menu will explain that no profiles are configured and offer to add one.
+
+This is the real flow of gauth:
+
+1. **You start a fresh repo and want to connect it with GitHub** — run `gauth` in the new folder and choose **Set up this folder (git init + GitHub)**.
+2. **You want to clone an existing GitHub repo** — use gauth to clone it and set up the profile for that repo.
+3. **You already cloned a repo and now want to switch profiles anytime** — open the repo, run `gauth`, and choose **Work on this repository (switch profile)**.
+4. **You already have the repo locally and just want to select a profile** — the menu will let you pick the correct profile for that repo without changing the repository itself.
+
+That makes the app feel like a guided setup assistant instead of a collection of raw shell commands.
+
+### The main interactive entry paths
+
+#### 1) Fresh start: create a new repo and connect it to GitHub
 
 ```bash
 mkdir my-app && cd my-app
 gauth
 ```
 
-Choose **Set up this folder (git init + GitHub)**. gauth runs `git init`, asks for the new GitHub repository URL, and connects it.
+Choose **Set up this folder (git init + GitHub)**. gauth runs `git init`, asks for the GitHub repo URL, and configures the repository in one flow.
 
-**Active GitHub repository** — the directory is already a repository with a GitHub origin:
+#### 2) Clone an existing GitHub repo with gauth
+
+```bash
+gauth clone https://github.com/owner/repo.git
+```
+
+This is the easiest path when you want gauth to clone the repository through your profile's SSH alias. It configures the repo, identity, and pre-push guard automatically.
+
+#### 3) You already cloned the repo and want to switch profiles
 
 ```bash
 cd existing-repo
 gauth
 ```
 
-Choose **Work on this repository (switch profile)**. The existing origin is detected and reused; you only choose which profile to use for this work session, then `git pull` and `git push` as usual.
+Choose **Work on this repository (switch profile)** if the repo already has a GitHub origin and you want to change which profile is active for the working session.
 
-**Cloned repository** — let gauth clone it with the right profile from the start:
-
-```bash
-gauth clone https://github.com/owner/repo.git
-```
-
-gauth picks (or asks for) a profile, clones through that profile's SSH alias, sets the local identity, and installs the pre-push guard. Pass `--profile work` to choose directly.
-
-If you already cloned by hand, `cd` into the repository and run:
+#### 4) You already have the repo locally and just want to pick a profile
 
 ```bash
-gauth profile select
+cd existing-repo
+gauth
 ```
 
-gauth reads the GitHub origin, lets you pick a profile, rewrites the remote to that profile's SSH alias, and installs the pre-push guard. No URL prompt. Simply opening `gauth` in that repository warns when no profile is selected and arms the guard.
+If the repo is already there, gauth will recognize the current state and let you select the profile for that repo. This is the same idea as “switch profile anytime,” but without creating or re-cloning anything.
 
-`gauth init` also works for the first two flows. It accepts an existing profile and an optional URL:
-
-```bash
-gauth init --profile work --repo https://github.com/owner/repo.git
-gauth init --profile personal --repo git@github.com:owner/repo.git
-```
-
-In every flow, gauth will:
-
-1. Run `git init` if needed
-2. Set local Git config (`user.name`, `user.email`, `remote.origin.url`)
-3. Configure the SSH remote using your profile's alias (e.g. `git@github.com-work:owner/repo.git`)
-4. Install the repository's pre-push profile guard
-5. Start or reuse `ssh-agent` and unlock the key
-6. Test the connection with `ssh -T git@alias`
-7. Show an **All set** summary with next steps
-
-### From the root menu
+#### 4) Browse saved profiles without changing repo state
 
 ```bash
 gauth
 ```
 
-Select from the interactive menu (see above).
+Choose **View saved profiles** and pick a saved profile to inspect the details. This is read-only and does not modify your repo or Git identity.
+
+#### 5) Add or remove a profile
+
+```bash
+gauth
+```
+
+Use **Add profile** to create a new SSH key + Git identity, or **Remove profile** to delete a profile after confirmation.
+
+The interactive menu is the recommended path for all of these actions. The direct commands are available as shortcuts, but they are not the primary experience.
+
+### The direct commands still exist
+
+These are still useful as shortcuts, but they are not the primary experience:
+
+```bash
+gauth profile add
+gauth profile select
+gauth profile remove
+gauth clone https://github.com/owner/repo.git
+gauth init --profile work --repo https://github.com/owner/repo.git
+```
+
+The direct commands mirror the same actions that the interactive menu performs, but the interactive mode is the recommended and most natural way to use gauth.
+
+### What gauth does under the hood
+
+In every interactive flow, gauth will:
+
+1. Run `git init` if needed
+2. Set local Git config (`user.name`, `user.email`, `remote.origin.url`)
+3. Configure the SSH remote using your profile alias (for example `git@github.com-work:owner/repo.git`)
+4. Install the repository's pre-push profile guard
+5. Start or reuse `ssh-agent` and unlock the key
+6. Test the connection with `ssh -T git@alias`
+7. Show an **All set** summary with next steps
+
+The SSH key is saved under `~/.ssh/gauth/id_<type>_<profile>`.
 
 ---
 
@@ -179,7 +260,7 @@ This installs `gauth` to `/usr/local/bin/gauth` and uses `sudo` only for the ind
 ./install.sh --prefix "$HOME/.local"
 ```
 
-Make sure `$HOME/.local/bin` is on `PATH`.
+This keeps the binary in `$HOME/.local/bin` and avoids the system install path. Make sure `$HOME/.local/bin` is on `PATH`.
 
 ### Other options
 
@@ -202,7 +283,13 @@ A successful install ends with a green ✔ message showing the installed path.
 ./uninstall.sh
 ```
 
-The uninstaller asks for confirmation, then authenticates with sudo before removing anything:
+`gauth` can be uninstalled in two stages:
+
+1. the script asks for your sudo password to verify identity
+2. it shows a red, bold warning telling you that this will remove the gauth-managed SSH config, keys, installed files, and local data
+3. it waits for you to press **Enter** to confirm the permanent removal
+
+This final confirmation is intentionally explicit because the uninstall is destructive. It removes:
 
 - the installed `gauth` binary and gauth's private `gum` copy
 - `~/.config/gauth`, `~/.local/state/gauth`, and `~/.local/share/gauth`
@@ -217,7 +304,7 @@ Options:
 
 ```bash
 ./uninstall.sh --prefix "$HOME/.local"   # user-local install
-./uninstall.sh --yes                     # skip confirmation; sudo auth still required
+./uninstall.sh --yes                     # skip the initial yes/no prompt; sudo auth and final Enter confirmation still apply
 ./uninstall.sh --purge-keys              # also remove legacy profile keys outside ~/.ssh/gauth
 ```
 
@@ -225,21 +312,19 @@ Options:
 
 ---
 
-## ⚡ quick start (condensed)
+## ⚡ quick start (interactive-first)
 
 ```bash
-# 1. Add your first profile
-gauth profile add
-
-# 2. New folder, or an existing/cloned repository
-gauth                      # menu adapts to the current directory
-gauth profile select       # clone: reuse the origin and pick a profile
-
-# 3. Or open the interactive menu
+# Start here in the folder you want to set up
 gauth
+
+# If you need a profile first, use the menu:
+# Add profile -> then return to the main menu
 ```
 
-`gauth init` accepts an existing profile and an optional URL:
+The interactive menu is the recommended path. It adapts to your current repo state and guides you through the correct setup flow without having to memorize command syntax. The direct commands remain available as shortcuts, but they are secondary.
+
+`gauth init` still accepts an existing profile and an optional URL:
 
 ```bash
 gauth init --profile work --repo https://github.com/owner/repo.git
