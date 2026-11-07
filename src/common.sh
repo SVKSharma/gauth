@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Shared constants and small, dependency-free helpers.
 
-GAUTH_VERSION="0.2.0"
+GAUTH_VERSION="0.1.1"
 GAUTH_PROGRAM="gauth"
 GAUTH_DEFAULT_HOST="github.com"
 GAUTH_DEFAULT_KEY_TYPE="ed25519"
@@ -55,7 +55,7 @@ gauth_file_uid() {
   esac
 }
 
-# gauth never escalates privileges. When a file was created by another user
+# gauth never writes files as root. When a file was created by another user
 # (usually an earlier sudo run), say exactly what to run instead of failing
 # with a bare permission error.
 gauth_permission_hint() {
@@ -63,7 +63,7 @@ gauth_permission_hint() {
   local owner
   owner="$(gauth_file_uid "$path" 2>/dev/null || printf '?')"
   ui_error "Cannot modify $path (owner uid $owner, you are uid $(id -u))."
-  ui_info "gauth never runs sudo. Fix ownership yourself with:"
+  ui_info "gauth does not modify root-owned files. Fix ownership yourself with:"
   printf '  sudo chown %s:%s %s\n' "$(id -u)" "$(id -g)" "$path" >&2
 }
 
@@ -96,6 +96,42 @@ gauth_trim() {
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s\n' "$value"
+}
+
+# Single-quote a value for safe interpolation into a generated shell script.
+gauth_shell_squote() {
+  local value="$1"
+  local out="" ch i=0
+  while [ "$i" -lt "${#value}" ]; do
+    ch="${value:$i:1}"
+    if [ "$ch" = "'" ]; then
+      out="${out}'\\''"
+    else
+      out="${out}${ch}"
+    fi
+    i=$((i + 1))
+  done
+  printf "'%s'\n" "$out"
+}
+
+# Absolute path to the running gauth executable. Used when generating the
+# repository pre-push hook, which may run later from a different directory.
+gauth_self_bin() {
+  local src="${BASH_SOURCE[0]}"
+  case "$src" in
+    */*)
+      local dir
+      dir="$(cd "$(dirname "$src")" >/dev/null 2>&1 && pwd -P)" || return 1
+      printf '%s/%s\n' "$dir" "$(basename "$src")"
+      ;;
+    *)
+      if gauth_command_exists "$src"; then
+        command -v "$src"
+      else
+        printf '%s\n' "$src"
+      fi
+      ;;
+  esac
 }
 
 gauth_has_control_chars() {

@@ -3,6 +3,7 @@
 
 GH_OWNER=""
 GH_REPO=""
+GH_ALIAS=""
 
 git_require() {
   if ! gauth_command_exists git; then
@@ -17,8 +18,25 @@ git_is_repo() {
   git rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
 
+git_remote_get_url() {
+  local name="${1:-origin}"
+  git config --local --get "remote.$name.url" 2>/dev/null
+}
+
+git_remote_set_url() {
+  local name="${1:-origin}"
+  local url="$2"
+  [ -n "$url" ] || return 1
+  if git config --local --get "remote.$name.url" >/dev/null 2>&1; then
+    git config --local "remote.$name.url" "$url" || return 1
+  else
+    git remote add "$name" "$url" || return 1
+  fi
+  return 0
+}
+
 git_current_remote() {
-  git config --local --get remote.origin.url 2>/dev/null
+  git_remote_get_url origin
 }
 
 git_has_origin() {
@@ -61,6 +79,7 @@ git_parse_github_url() {
   url="$(gauth_trim "${1:-}")"
   GH_OWNER=""
   GH_REPO=""
+  GH_ALIAS=""
 
   [ -n "$url" ] || return 1
   case "$url" in
@@ -75,9 +94,18 @@ git_parse_github_url() {
     https://github.com/*) rest="${url#https://github.com/}" ;;
     http://github.com/*) rest="${url#http://github.com/}" ;;
     git://github.com/*) rest="${url#git://github.com/}" ;;
-    ssh://git@github.com/*) rest="${url#ssh://git@github.com/}" ;;
-    ssh://github.com/*) rest="${url#ssh://github.com/}" ;;
-    git@github.com:*) rest="${url#git@github.com:}" ;;
+    ssh://git@github.com/*)
+      rest="${url#ssh://git@github.com/}"
+      GH_ALIAS="$GAUTH_DEFAULT_HOST"
+      ;;
+    ssh://github.com/*)
+      rest="${url#ssh://github.com/}"
+      GH_ALIAS="$GAUTH_DEFAULT_HOST"
+      ;;
+    git@github.com:*)
+      rest="${url#git@github.com:}"
+      GH_ALIAS="$GAUTH_DEFAULT_HOST"
+      ;;
     www.github.com/*) rest="${url#www.github.com/}" ;;
     github.com/*) rest="${url#github.com/}" ;;
     git@*:*)
@@ -85,12 +113,14 @@ git_parse_github_url() {
       host="${host%%:*}"
       rest="${url#*:}"
       git_alias_is_github "$host" || return 1
+      GH_ALIAS="$host"
       ;;
     ssh://git@*/*)
       host="${url#ssh://git@}"
       host="${host%%/*}"
       rest="${url#ssh://git@*/}"
       git_alias_is_github "$host" || return 1
+      GH_ALIAS="$host"
       ;;
     *)
       # Allow the short "owner/repo" form.
@@ -130,6 +160,16 @@ git_remote_url() {
   printf 'git@%s:%s/%s.git\n' "$alias" "$owner" "$repo"
 }
 
+# Clone through a profile alias so the matching SSH key is used from the
+# first fetch. Callers run this inside the repository flow only.
+git_clone() {
+  local url="$1"
+  local dir="$2"
+  [ -n "$url" ] || return 1
+  [ -n "$dir" ] || return 1
+  git clone -- "$url" "$dir"
+}
+
 git_init_repo() {
   local branch="${1:-$SETTING_DEFAULT_BRANCH}"
   validate_branch_name "$branch" || return 1
@@ -162,14 +202,7 @@ git_set_local_identity() {
 }
 
 git_set_remote() {
-  local url="$1"
-  [ -n "$url" ] || return 1
-  if git_has_origin; then
-    git config --local remote.origin.url "$url" || return 1
-  else
-    git remote add origin "$url" || return 1
-  fi
-  return 0
+  git_remote_set_url origin "$1"
 }
 
 git_set_gauth_profile() {

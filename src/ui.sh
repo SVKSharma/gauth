@@ -21,7 +21,9 @@ UI_NEW_PROFILE_LABEL="Add new profile"
 # still use the plain label text.
 UI_MENU_HIGHLIGHT="$UI_NEW_PROFILE_LABEL"
 
-# Modern, low-saturation palette (blue/teal/amber), never the default pink.
+# Semantic palette: blue means information/navigation, green means success,
+# amber means warning, and red means error. Each level also has its own glyph
+# (✔ / ! / ✖), so meaning never depends on color alone.
 UI_ACCENT_HEX="#7aa2f7"
 UI_SUCCESS_HEX="#9ece6a"
 UI_WARN_HEX="#e0af68"
@@ -46,6 +48,7 @@ if [ "$UI_COLOR_ENABLED" -eq 1 ]; then
   UI_DIM=$'\033[2m'
   if [ "$UI_256" -eq 1 ]; then
     UI_ACCENT=$'\033[38;5;111m'
+    UI_SUCCESS=$'\033[1;38;5;114m'
     UI_GREEN=$'\033[38;5;114m'
     UI_YELLOW=$'\033[38;5;179m'
     UI_RED=$'\033[38;5;203m'
@@ -53,6 +56,7 @@ if [ "$UI_COLOR_ENABLED" -eq 1 ]; then
     UI_TEXT=$'\033[38;5;147m'
   else
     UI_ACCENT=$'\033[36m'
+    UI_SUCCESS=$'\033[1;32m'
     UI_GREEN=$'\033[32m'
     UI_YELLOW=$'\033[33m'
     UI_RED=$'\033[31m'
@@ -67,6 +71,7 @@ else
   UI_BOLD=""
   UI_DIM=""
   UI_ACCENT=""
+  UI_SUCCESS=""
   UI_GREEN=""
   UI_YELLOW=""
   UI_RED=""
@@ -75,6 +80,53 @@ else
   UI_CYAN=""
   UI_BLUE=""
   UI_MAGENTA=""
+fi
+
+# ---------------------------------------------------------------------------
+# Pixel-block banner. The cat head with the terminal prompt mirrors the app
+# icon in assets/, and the gradient changes each row so it reads as full color.
+# ---------------------------------------------------------------------------
+UI_BANNER_LOGO_ART=(
+  "  ▄█▄    ▄█▄  "
+  " ████████████ "
+  " ██  ▀  ▀  ██ "
+  " ██   >_   ██ "
+  "  ▀████████▀  "
+  "   ▀▀▀▀▀▀▀▀   "
+)
+
+UI_BANNER_WORD_ART=(
+  " ██████╗  █████╗ ██╗   ██╗ ████████╗ ██╗  ██╗"
+  "██╔════╝ ██╔══██╗██║   ██║ ╚══██╔══╝ ██║  ██║"
+  "██║  ███╗███████║██║   ██║    ██║    ███████║"
+  "██║   ██║██╔══██║██║   ██║    ██║    ██╔══██║"
+  "╚██████╔╝██║  ██║╚██████╔╝    ██║    ██║  ██║"
+  " ╚═════╝ ╚═╝  ╚═╝ ╚═════╝     ╚═╝    ╚═╝  ╚═╝"
+)
+
+if [ "$UI_COLOR_ENABLED" -eq 1 ]; then
+  if [ "$UI_256" -eq 1 ]; then
+    UI_BANNER_LOGO_COLORS=(
+      $'\033[38;5;51m' $'\033[38;5;45m' $'\033[38;5;39m'
+      $'\033[38;5;33m' $'\033[38;5;27m' $'\033[38;5;21m'
+    )
+    UI_BANNER_WORD_COLORS=(
+      $'\033[38;5;45m' $'\033[38;5;51m' $'\033[38;5;63m'
+      $'\033[38;5;69m' $'\033[38;5;105m' $'\033[38;5;141m'
+    )
+  else
+    UI_BANNER_LOGO_COLORS=(
+      $'\033[36m' $'\033[36m' $'\033[34m'
+      $'\033[34m' $'\033[35m' $'\033[35m'
+    )
+    UI_BANNER_WORD_COLORS=(
+      $'\033[36m' $'\033[34m' $'\033[35m'
+      $'\033[36m' $'\033[34m' $'\033[35m'
+    )
+  fi
+else
+  UI_BANNER_LOGO_COLORS=("" "" "" "" "" "")
+  UI_BANNER_WORD_COLORS=("" "" "" "" "" "")
 fi
 
 ui_has_gum() {
@@ -100,7 +152,7 @@ ui_info() {
 }
 
 ui_success() {
-  printf '%s✔%s %s\n' "$UI_GREEN" "$UI_RESET" "$*" >&2
+  printf '%s✔ %s%s\n' "$UI_SUCCESS" "$*" "$UI_RESET" >&2
 }
 
 ui_warn() {
@@ -113,6 +165,40 @@ ui_error() {
 
 ui_hint() {
   printf '%s%s%s\n' "$UI_DIM" "$1" "$UI_RESET" >&2
+}
+
+# A four-stop gradient rule, used above and below the banner.
+ui_banner_rule() {
+  printf '%s━━━━━━━━━━%s━━━━━━━━━━%s━━━━━━━━━━%s━━━━━━━━━━%s\n' \
+    "${UI_BANNER_WORD_COLORS[0]}" \
+    "${UI_BANNER_WORD_COLORS[1]}" \
+    "${UI_BANNER_WORD_COLORS[2]}" \
+    "${UI_BANNER_WORD_COLORS[3]}" \
+    "$UI_RESET" >&2
+}
+
+# The cat-with-terminal pixel mark plus the wordmark. Interactive screens only;
+# set GAUTH_NO_BANNER=1 for a compact, text-only session.
+ui_banner() {
+  [ "${GAUTH_NO_BANNER:-0}" = "1" ] && return 0
+  ui_interactive || return 0
+  [ "${#UI_BANNER_LOGO_ART[@]}" -eq 6 ] || return 0
+  [ "${#UI_BANNER_WORD_ART[@]}" -eq 6 ] || return 0
+
+  local i logo word
+  printf '\n' >&2
+  ui_banner_rule
+  for i in 0 1 2 3 4 5; do
+    logo="${UI_BANNER_LOGO_ART[$i]}"
+    word="${UI_BANNER_WORD_ART[$i]}"
+    printf '  %s%s%s  %s%s%s\n' \
+      "${UI_BANNER_LOGO_COLORS[$i]}" "$logo" "$UI_RESET" \
+      "${UI_BANNER_WORD_COLORS[$i]}" "$word" "$UI_RESET" >&2
+  done
+  printf '                  %sYour guided Git + GitHub connection%s  %sv%s%s\n' \
+    "$UI_MUTED" "$UI_RESET" "$UI_SUCCESS" "$GAUTH_VERSION" "$UI_RESET" >&2
+  ui_banner_rule
+  printf '\n' >&2
 }
 
 # Enhanced header with gum style
@@ -204,8 +290,96 @@ ui_stepper() {
 # ---------------------------------------------------------------------------
 # Input
 # ---------------------------------------------------------------------------
+# One key/byte from the terminal, without waiting for Enter. bash's
+# `read -n 1` routes through readline on a terminal, which re-enables ISIG, so
+# Ctrl-C would kill gauth instead of reaching our handler. dd/od reads the byte
+# directly, keeping Esc and Ctrl-C usable. Result is in UI_KEY_CHAR.
+UI_KEY_CHAR=""
+ui_read_key() {
+  local tty="$1"
+  local code=""
+  [ -r "$tty" ] || return 1
+
+  if command -v dd >/dev/null 2>&1 && command -v od >/dev/null 2>&1; then
+    code="$(dd bs=1 count=1 <"$tty" 2>/dev/null | od -An -tu1 2>/dev/null | tr -d ' \n')"
+    [ -n "$code" ] || return 1
+    printf -v UI_KEY_CHAR "\\$(printf '%03o' "$code")"
+    return 0
+  fi
+
+  # Minimal system fallback; Ctrl-C may not be recoverable here.
+  IFS= read -rsn1 UI_KEY_CHAR || return 1
+  return 0
+}
+
+# Editable line for wizard prompts, read from the terminal without waiting for
+# Enter for the navigation keys:
+#   Esc               -> 2 (back)
+#   Ctrl-C / Ctrl-D   -> 4 (cancel)
+#   Enter             -> 0 and prints the line
+# Only called once the prompt has been printed. Terminal settings are restored
+# before returning, so an interrupted wizard never leaves the shell raw.
+ui_read_editable_line() {
+  local tty=/dev/tty
+  [ -r "$tty" ] || return 1
+  local saved
+  saved="$(stty -g <"$tty" 2>/dev/null)" || return 1
+  # -isig makes Ctrl-C arrive as a byte instead of killing the whole process,
+  # so it can cancel the wizard and return to the menu.
+  stty -echo -icanon min 1 time 0 -isig <"$tty" 2>/dev/null || return 1
+
+  local line="" ch rc=0 n=0
+  while :; do
+    ui_read_key "$tty" || { rc=4; break; }
+    ch="$UI_KEY_CHAR"
+    case "$ch" in
+      $'\r'|$'\n') break ;;
+      $'\033')
+        # A bare Esc goes back; a buffered arrow/CSI key (Esc [ A, ...) is
+        # swallowed so its trailing bytes do not land in the next prompt.
+        stty min 0 time 0 <"$tty" 2>/dev/null
+        n=0
+        while [ "$n" -lt 4 ] && ui_read_key "$tty"; do
+          n=$((n + 1))
+          case "$UI_KEY_CHAR" in
+            '['|'O'|';'|'~'|[0-9]|[A-H]) ;;
+            *) break ;;
+          esac
+        done
+        stty min 1 time 0 <"$tty" 2>/dev/null
+        rc=2
+        break
+        ;;
+      $'\003'|$'\004') rc=4; break ;;
+      $'\177'|$'\b')
+        if [ -n "$line" ]; then
+          line="${line%?}"
+          printf '\b \b' >&2
+        fi
+        ;;
+      $'\025')
+        while [ -n "$line" ]; do
+          line="${line%?}"
+          printf '\b \b' >&2
+        done
+        ;;
+      [[:cntrl:]]*) ;;
+      *)
+        line="$line$ch"
+        printf '%s' "$ch" >&2
+        ;;
+    esac
+  done
+
+  stty "$saved" <"$tty" 2>/dev/null || true
+  printf '\n' >&2
+  [ "$rc" -eq 0 ] && printf '%s\n' "$line"
+  return "$rc"
+}
+
 # The optional 4th argument adds wizard-style navigation: Enter keeps the
-# value, ":back" returns 2, and ":cancel"/":q" returns 4.
+# value, ":back" returns 2, and ":cancel"/":q" returns 4. On a terminal, Esc
+# and Ctrl-C do the same immediately, without needing Enter.
 ui_input() {
   local header="$1"
   local placeholder="${2:-}"
@@ -234,17 +408,24 @@ ui_input() {
 
   if ! [ -t 0 ]; then
     IFS= read -r answer || return 1
+    case "$answer" in
+      ':b'|':back') return 2 ;;
+      ':f'|':forward') return 3 ;;
+      ':cancel'|':c'|':q') return 4 ;;
+    esac
     [ -n "$answer" ] || answer="$default"
     printf '%s\n' "$answer"
     return 0
   fi
 
-  [ "$show_nav" -eq 1 ] && ui_hint "  :back · :forward · :cancel"
+  [ "$show_nav" -eq 1 ] && ui_hint "  Esc: back · Ctrl-C: cancel · :back · :forward"
   printf '%s%s%s ' "$UI_ACCENT" "$header" "$UI_RESET" >&2
   [ -n "$placeholder" ] && printf '%s(%s) %s' "$UI_DIM" "$placeholder" "$UI_RESET" >&2
   [ -n "$default" ] && printf '%s[%s] %s' "$UI_MUTED" "$default" "$UI_RESET" >&2
   printf '❯ ' >&2
-  IFS= read -r answer || return 1
+  local read_rc=0
+  answer="$(ui_read_editable_line)" || read_rc=$?
+  [ "$read_rc" -eq 0 ] || return "$read_rc"
   case "$answer" in
     $'\033'*) return 2 ;;
     ':b'|':back'|'back'|'BACK') return 2 ;;
@@ -333,7 +514,9 @@ ui_menu_raw() {
   [ -r "$tty" ] || return 1
   local saved
   saved="$(stty -g <"$tty" 2>/dev/null)" || return 1
-  stty -echo -icanon min 1 time 0 <"$tty" 2>/dev/null || return 1
+  # -isig lets Ctrl-C cancel the menu instead of killing the process and
+  # leaving the terminal in raw mode.
+  stty -echo -icanon min 1 time 0 -isig <"$tty" 2>/dev/null || return 1
   printf '\033[?25l' >&2
 
   local selected=0 drawn=0 key rest first=1 notice=""
@@ -362,18 +545,19 @@ ui_menu_raw() {
       drawn=$((drawn + 1))
       i=$((i + 1))
     done
-    printf '%s↑/↓ j/k move · h/← back · l/→ open · enter select · q quit%s\n' "$UI_DIM" "$UI_RESET" >&2
+    printf '%s↑/↓ j/k move · h/← back · l/→ open · enter select · q/ctrl-c quit%s\n' "$UI_DIM" "$UI_RESET" >&2
     drawn=$((drawn + 1))
     if [ -n "$notice" ]; then
       printf '%s! %s%s\n' "$UI_YELLOW" "$notice" "$UI_RESET" >&2
       drawn=$((drawn + 1))
     fi
 
-    IFS= read -rsn1 key <"$tty" || {
+    ui_read_key "$tty" || {
       stty "$saved" <"$tty" 2>/dev/null
       printf '\033[?25h' >&2
       return 1
     }
+    key="$UI_KEY_CHAR"
     case "$key" in
       ''|$'\r'|$'\n') break ;;
       k|K) [ "$selected" -gt 0 ] && selected=$((selected - 1)); notice="" ;;
@@ -395,10 +579,12 @@ ui_menu_raw() {
         fi
         notice="Use Enter to select an item; l/→ does not choose."
         ;;
-      q|Q)
-        # Distinct from "back": only q leaves the application at the root menu.
+      q|Q|$'\003')
+        # Distinct from "back": only q/Ctrl-C leaves the application at the
+        # root menu.
         stty "$saved" <"$tty" 2>/dev/null
         printf '\033[?25h' >&2
+        printf '\n' >&2
         return 4
         ;;
       $'\033')

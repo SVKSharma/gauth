@@ -62,10 +62,11 @@ profile_add() {
     "$GAUTH_GUM_BIN" style \
       --foreground "$UI_MUTED_HEX" \
       --margin "0 0 1 2" \
-      -- "Esc or h/←: back · l/→: forward · :cancel exits · enter: confirm" >&2
+      -- "Esc or h/←: back · Ctrl-C: cancel · l/→: forward · enter: confirm" >&2
   else
     ui_header "Add new profile"
-    ui_hint "h/← or Esc: back · l/→: forward · :cancel exits · the timeline records each choice."
+    ui_hint "Esc or h/←: back · Ctrl-C: cancel · l/→: forward · :cancel exits."
+    ui_hint "The timeline records each choice; nothing is created until the end."
   fi
 
   while [ "$step" -lt "$total" ]; do
@@ -104,7 +105,7 @@ profile_add() {
               ui_kv "Email" "$PROFILE_EMAIL"
               ui_kv "Key" "$PROFILE_KEY"
             fi
-            ui_hint "Choose a different name, or use 'View / select profile' to reuse it."
+            ui_hint "Choose a different name, or use 'View / switch profile' to reuse it."
             continue
           fi
           name="$candidate"
@@ -357,7 +358,7 @@ profile_add() {
   # Pre-flight: re-check everything after the wizard, before creating any files.
   if profile_exists "$name"; then
     ui_error "Profile '$name' already exists; nothing was changed."
-    ui_info "Use 'View / select profile' to reuse it, or choose another name."
+    ui_info "Use 'View / switch profile' to reuse it, or choose another name."
     return 1
   fi
   if profile_alias_in_use "$alias" ""; then
@@ -509,10 +510,13 @@ profile_add() {
 # ---------------------------------------------------------------------------
 # View / select
 # ---------------------------------------------------------------------------
-profile_select_view() {
-  local name
-  name="$(profile_pick "Select a profile")" || return 1
+profile_none_message() {
+  ui_warn "No accounts/profiles configured yet."
+  ui_info "Add one with 'gauth profile add' or choose 'Add profile'."
+}
 
+profile_render_header() {
+  local name="$1"
   if ui_has_gum && ui_interactive; then
     "$GAUTH_GUM_BIN" style \
       --border rounded \
@@ -525,14 +529,84 @@ profile_select_view() {
   else
     ui_header "Profile: $name"
   fi
+}
+
+profile_show_cmd() {
+  local name="$1"
+  profile_require "$name" || return 1
+  profile_render_header "$name"
   profile_print "$name"
-  if git_is_repo; then
+  return 0
+}
+
+profile_select_view() {
+  local name current=""
+  if [ "$(profile_count)" -eq 0 ]; then
+    profile_none_message
+    return 1
+  fi
+
+  if ! git_is_repo; then
+    name="$(profile_pick "View which profile?" 0)" || return 1
+    profile_render_header "$name"
+    profile_print "$name"
+    ui_hint "Not inside a git repository, so this profile was only displayed."
+    return 0
+  fi
+
+  current="$(git_get_gauth_profile 2>/dev/null || true)"
+
+  if ! repo_detect_github_origin; then
+    name="$(profile_pick "View which profile?" 0 "$current")" || return 1
+    profile_render_header "$name"
+    profile_print "$name"
     ui_section "Current repository"
     ui_kv "Status" "$(git_repo_summary)"
-  else
-    ui_hint "Not inside a git repository."
+    ui_hint "No GitHub origin detected; use 'Connect this repository to GitHub' first."
+    return 0
   fi
-  return 0
+
+  # Inside a GitHub repository: choosing a profile switches this repository
+  # (remote alias, local Git identity, gauth.profile, and the pre-push guard).
+  ui_section "Profile for this repository"
+  ui_kv "Repository" "$REPO_OWNER/$REPO_REPO"
+  ui_kv "Origin" "$REPO_ORIGIN_URL"
+  ui_kv "Selected profile" "${current:-none}"
+  name="$(profile_pick "Switch to which profile?" 0 "$current")" || return 1
+
+  if [ "$name" = "$current" ]; then
+    profile_render_header "$name"
+    profile_print "$name"
+    ui_success "Profile '$name' is already selected for this repository."
+    return 0
+  fi
+
+  repo_apply "$name" "$REPO_ORIGIN_URL" 0 1
+}
+
+profile_select_for_repo() {
+  local name="${1:-}" current=""
+  git_require || return 1
+  if ! git_is_repo; then
+    ui_error "This directory is not a git repository."
+    ui_info "Open the repository folder first, then run 'gauth profile select'."
+    return 1
+  fi
+  if ! repo_detect_github_origin; then
+    ui_error "No GitHub origin is configured for this repository."
+    ui_info "Use 'gauth init --repo <url>' or the repository menu item first."
+    return 1
+  fi
+  if [ "$(profile_count)" -eq 0 ]; then
+    profile_none_message
+    return 1
+  fi
+
+  current="$(git_get_gauth_profile 2>/dev/null || true)"
+  if [ -z "$name" ]; then
+    name="$(profile_pick "Switch profile for this repository" 0 "$current")" || return 1
+  fi
+  repo_apply "$name" "$REPO_ORIGIN_URL" 0 1
 }
 
 # ---------------------------------------------------------------------------
@@ -544,11 +618,19 @@ profile_remove() {
   name="$(profile_pick "Remove which profile?")" || return 1
   profile_require "$name" || return 1
 
-  # Pre-flight: the registry must be rewritable. gauth never escalates
-  # privileges, so explain exactly how to fix a root-owned file up front.
+  # Removing a profile is destructive, so require administrator authentication
+  # before anything is changed. sudo only verifies the password; gauth keeps
+  # editing the user's own files as the current user.
+  if ! gauth_require_sudo_auth "removing a profile"; then
+    ui_info "Profile removal cancelled; nothing was changed."
+    return 1
+  fi
+
+  # Pre-flight: the registry must be rewritable. gauth never changes file
+  # ownership or writes root-owned paths, so explain how to fix it up front.
   if ! gauth_is_writable "$GAUTH_PROFILES_FILE"; then
     gauth_permission_hint "$GAUTH_PROFILES_FILE"
-    ui_info "gauth never runs sudo; fix the ownership above and retry."
+    ui_info "gauth does not modify root-owned files; fix the ownership above and retry."
     return 1
   fi
 

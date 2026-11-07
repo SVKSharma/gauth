@@ -5,16 +5,18 @@ set -u
 ROOT="$(cd "$(dirname "$0")" && pwd -P)"
 DIST="$ROOT/dist"
 OUT="$DIST/gauth"
-VERSION="0.2.0"
+VERSION="0.1.1"
 
 MODULES=(
   common
   ui
+  auth
   config
   clipboard
   ssh
   sshconfig
   git
+  hooks
   profile
   settings
   doctor

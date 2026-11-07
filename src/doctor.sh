@@ -4,7 +4,7 @@
 DOCTOR_FAILURES=0
 
 doctor_ok() {
-  printf '%s✔%s %s\n' "$UI_GREEN" "$UI_RESET" "$*"
+  printf '%s✔ %s%s\n' "$UI_SUCCESS" "$*" "$UI_RESET"
 }
 
 doctor_warn() {
@@ -244,12 +244,27 @@ doctor_run() {
   ui_section "Repository"
   if git_is_repo; then
     doctor_ok "Current directory is a git repository ($(git_repo_summary))"
+    if git_pre_push_hook_installed; then
+      doctor_ok "Pre-push profile guard is installed"
+    else
+      doctor_warn "Pre-push profile guard is not installed"
+    fi
   else
     doctor_warn "Current directory is not a git repository"
   fi
 
   if [ "$fix" -eq 1 ]; then
     doctor_fix_permissions
+    if git_is_repo; then
+      local hook_rc=0
+      git_install_pre_push_hook >/dev/null 2>&1 || hook_rc=$?
+      case "$hook_rc" in
+        0) doctor_ok "Pre-push profile guard installed or updated." ;;
+        2) doctor_warn "A custom pre-push hook exists; left untouched." ;;
+        3) : ;;
+        *) doctor_warn "Could not install the pre-push profile guard." ;;
+      esac
+    fi
   fi
 
   printf '\n'
